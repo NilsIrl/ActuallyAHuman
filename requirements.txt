@@ -1,0 +1,7 @@
+torch
+ultralytics
+transformers
+Pillow
+clip
+matplotlib
+numpy
