@@ -98,6 +98,7 @@ class Roboclaw:
         READNVM = 95
         SETCONFIG = 98
         GETCONFIG = 99
+        SETPOSM2 = 120
         SETM1MAXCURRENT = 133
         SETM2MAXCURRENT = 134
         GETM1MAXCURRENT = 135
@@ -263,12 +264,12 @@ class Roboclaw:
                     crc = self._readchecksumword()
                     if crc[0]:
                         if self._crc&0xFFFF!=crc[1]&0xFFFF:
-                            return (0,0)
+                            assert False
                         return (1,val1[1],val2[1])
             trys-=1
             if trys==0:
                 break
-        return (0,0)
+        assert False
 
     def _read_n(self,address,cmd,args):
         trys = self._trystimeout
@@ -549,6 +550,18 @@ class Roboclaw:
             trys=trys-1
         return False
 
+    def _write41(self,address,cmd,val1,val2):
+        trys=self._trystimeout
+        while trys:
+            self._sendcommand(address,cmd)
+            self._writelong(val1)
+            self._writebyte(val2)
+            if self._writechecksum():
+                return True
+            trys=trys-1
+        return False
+            
+
     def _write44441(self,address,cmd,val1,val2,val3,val4,val5):
         trys=self._trystimeout
         while trys:
@@ -736,7 +749,7 @@ class Roboclaw:
             trys-=1
             if trys==0:
                 break
-        return (0,0)
+        assert False
 
     def SetEncM1(self,address,cnt):
         return self._write4(address,self.Cmd.SETM1ENCCOUNT,cnt)
@@ -997,6 +1010,9 @@ class Roboclaw:
 
     def SetM2EncoderMode(self,address,mode):
         return self._write1(address,self.Cmd.SETM2ENCODERMODE,mode)
+
+    def SetM2Position(self,address,position,buffer):
+        return self._write41(address,self.Cmd.SETPOSM2,position,buffer)
 
     #saves active settings to NVM
     def WriteNVM(self,address):

@@ -47,9 +47,34 @@ if not version[0]:
 else:
     print(repr(version[1]))
 
-rc.MixedFoward(address, 64)
-time.sleep(1)
-rc.ForwardMixed(address, 0)
+
+rc.SetM1VelocityPID(address, 100, 0, 0, 2500)
+rc.SetM2VelocityPID(address, 100, 0, 0, 2500)
+
+# print(rc.ReadM1VelocityPID(address))
+# print(rc.ReadM2VelocityPID(address))
+
+# rc.SetM1VelocityPID(address, 0, 0, 0, 0)
+# rc.SetM2PositionPID(address, 0, 0, 0, 0)
+
+displayspeed()
+# rc.ForwardM2(address, 127)
+rc.SpeedM2(address, 2500)
+rc.SpeedM1(address, 2500)
+# rc.ForwardMixed(address, 127)
+# rc.ForwardMixed(address, 64)
+# rc.TurnLeftMixed(address, 64)
+# time.sleep(0.25)
+# rc.TurnLeftMixed(address, 127)
+# rc.ForwardMixed(address, 127)
+time.sleep(4)
+# rc.ForwardMixed(address, 0)
+# rc.ForwardMixed(address, 0)
+# rc.TurnLeftMixed(address, 0)
+
+rc.SpeedM2(address, 0)
+rc.SpeedM1(address, 0)
+# rc.ForwardM2(address, 0)
 
 #while True:
 #    rc.SpeedM1(address, 12000)
@@ -64,3 +89,4 @@ rc.ForwardMixed(address, 0)
 #        displayspeed()
 #        time.sleep(0.01)
 #
+displayspeed()
