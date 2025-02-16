@@ -98,7 +98,9 @@ class Roboclaw:
         READNVM = 95
         SETCONFIG = 98
         GETCONFIG = 99
+        SETPOSM1 = 119
         SETPOSM2 = 120
+        SETPOSM1M2 = 121
         SETM1MAXCURRENT = 133
         SETM2MAXCURRENT = 134
         GETM1MAXCURRENT = 135
@@ -1011,8 +1013,14 @@ class Roboclaw:
     def SetM2EncoderMode(self,address,mode):
         return self._write1(address,self.Cmd.SETM2ENCODERMODE,mode)
 
+    def SetM1Position(self,address,position,buffer):
+        return self._write41(address,self.Cmd.SETPOSM1,position,buffer)
+
     def SetM2Position(self,address,position,buffer):
         return self._write41(address,self.Cmd.SETPOSM2,position,buffer)
+    
+    def SetM1M2Position(self,address,position1,position2,buffer):
+        return self._write441(address,self.Cmd.SETPOSM1M2,position1,position2,buffer)
 
     #saves active settings to NVM
     def WriteNVM(self,address):

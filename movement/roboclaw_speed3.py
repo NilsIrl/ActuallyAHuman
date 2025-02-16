@@ -1,5 +1,6 @@
 import time
 from roboclaw import Roboclaw
+import sqlite3
 
 # Windows comport name
 #rc = Roboclaw("COM3", 115200)
@@ -51,44 +52,37 @@ else:
 rc.SetM1VelocityPID(address, 100, 0, 0, 2500)
 rc.SetM2VelocityPID(address, 100, 0, 0, 2500)
 
-# print(rc.ReadM1VelocityPID(address))
-# print(rc.ReadM2VelocityPID(address))
+rotation_target = 45
+desired_heading = get_latest_imu_data() + rotation_target
 
-# rc.SetM1VelocityPID(address, 0, 0, 0, 0)
-# rc.SetM2PositionPID(address, 0, 0, 0, 0)
+start_time = time.time()
+PGAIN = 3
+# FIXME: use monotonic time
+while time.time() - start_time < 10:
+    imu_reading = get_latest_imu_data()
+    print(f"imu_reading: {imu_reading}")
+    angle_difference = desired_heading - imu_reading
+    print(f"angle_difference: {angle_difference}")
+    if abs(angle_difference) < 2.5:
+        break
 
-displayspeed()
-# rc.ForwardM2(address, 127)
-# rc.SpeedM2(address, 2500)
-# rc.SpeedM1(address, 2500)
-rc.SpeedM1M2(address, 2500, 2500)
-# rc.ForwardMixed(address, 127)
-# rc.ForwardMixed(address, 64)
-# rc.TurnLeftMixed(address, 64)
-# time.sleep(0.25)
-# rc.TurnLeftMixed(address, 127)
-# rc.ForwardMixed(address, 127)
-time.sleep(2)
-# rc.ForwardMixed(address, 0)
-# rc.ForwardMixed(address, 0)
-# rc.TurnLeftMixed(address, 0)
+    turnpower = angle_difference * PGAIN
+    turnpower_m2 = -turnpower
 
-rc.SpeedM1M2(address, 0, 0)
-# rc.SpeedM2(address, 0)
-# rc.SpeedM1(address, 0)
-# rc.ForwardM2(address, 0)
+    print(f"turnpower: {turnpower}")
+    turnpower = max(-64, min(63, turnpower))
+    turnpower_m2 = max(-64, min(63, turnpower_m2))
 
-#while True:
-#    rc.SpeedM1(address, 12000)
-#    rc.SpeedM2(address, -12000)
-#    for _ in range(200):
-#        displayspeed()
-#        time.sleep(0.01)
-#
-#    rc.SpeedM1(address, -12000)
-#    rc.SpeedM2(address, 12000)
-#    for _ in range(200):
-#        displayspeed()
-#        time.sleep(0.01)
-#
-displayspeed()
+    final_power_m1 = int(turnpower + 64)
+    final_power_m2 = int(turnpower_m2 + 64)
+
+    print(f"final_power: {final_power_m1}")
+    print(f"final_power: {final_power_m2}")
+
+    rc.ForwardBackwardM1(address, final_power_m1)
+    rc.ForwardBackwardM2(address, final_power_m2)
+
+# FIXME: use monotonic time
+
+rc.ForwardBackwardM1(address, 64)
+rc.ForwardBackwardM2(address, 64)

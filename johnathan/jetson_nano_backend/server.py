@@ -1,9 +1,11 @@
-from fastapi import FastAPI, WebSocket
+import sqlite3
+from fastapi import FastAPI, WebSocket, BackgroundTasks
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from typing import List
 import uvicorn
 import asyncio
+from microservices_utils import get_latest_gps_coordinates, get_latest_imu_data
 import random  # Simulating GPS data (replace with real data)
 
 class Order(BaseModel):
@@ -46,22 +48,18 @@ async def websocket_endpoint(websocket: WebSocket):
         
         while True:
             try:
-                if global_state.current_waypoints:
-                    print(f"Processing waypoint: {global_state.current_waypoints[0]}")
-                    # Waypoints are stored as [longitude, latitude], but we need to send as {latitude, longitude}
-                    longitude = global_state.current_waypoints[0][0]
-                    latitude = global_state.current_waypoints[0][1]
-                    global_state.current_waypoints.pop(0)
+                coordinates = get_latest_gps_coordinates()
+                
+                if coordinates:
+                    latitude, longitude = coordinates
                     gps_data = {"latitude": latitude, "longitude": longitude}
-
                     print(f"Sending GPS data: {gps_data}")
                     await websocket.send_json(gps_data)
-                    
                 else:
-                    # Only send ping if we don't have GPS data to send
-                    await websocket.send_json({"type": "ping"})
-                
-                await asyncio.sleep(0.1)
+                    # If no GPS data found, check waypoints
+                    print("Error: No GPS data or waypoints available")
+
+                await asyncio.sleep(10)
                 
             except Exception as e:
                 print(f"Error in WebSocket loop: {e}")
@@ -85,14 +83,24 @@ async def add_order(order: Order):
     print(f"Received order: {order.order}")
     return {"message": "Order added successfully"}
 
+async def process_waypoints(waypoints: List[tuple[float, float]]):
+    # Your long-running code here
+    print("Starting waypoint processing...")
+    initial_position = get_latest_gps_coordinates()
+    print(f"Initial position: {initial_position}")
+    print(waypoints)
+    await asyncio.sleep(600)  # Simulating 10-minute process
+    print("Waypoint processing complete")
+
 @app.post("/send_waypoints")
-async def send_waypoints(waypoints: Waypoints):
-    
+async def send_waypoints(waypoints: Waypoints, background_tasks: BackgroundTasks):
     print(f"Received waypoints: {waypoints}")
-        
     global_state.current_waypoints = waypoints.waypoints
     
-    return {"status": 200, "message": "Waypoints received successfully"}
+    # Schedule the long-running task to run in the background
+    background_tasks.add_task(process_waypoints, waypoints.waypoints)
+    
+    return {"status": 200, "message": "Waypoints received successfully. Processing started."}
     
     
 if __name__ == "__main__":
