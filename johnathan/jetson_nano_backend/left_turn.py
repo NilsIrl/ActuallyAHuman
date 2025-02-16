@@ -1,5 +1,7 @@
+import math
 import time
 from roboclaw import Roboclaw
+from microservices_utils import rotate_robot, move_robot_forward_time
 import sqlite3
 
 # Windows comport name
@@ -39,6 +41,7 @@ def displayspeed():
     else:
         print("failed")
 
+
 rc.Open()
 address = 0x80
 
@@ -49,40 +52,11 @@ else:
     print(repr(version[1]))
 
 
-rc.SetM1VelocityPID(address, 100, 0, 0, 2500)
-rc.SetM2VelocityPID(address, 100, 0, 0, 2500)
+rc.SetM1PositionPID(address, 200, 0, 4000, 100, 10, -2_000_000_000, 2_000_000_000)
+rc.SetM2PositionPID(address, 200, 0, 4000, 100, 10, -2_000_000_000, 2_000_000_000)
+rc.SetM1VelocityPID(address, 400, 0, 0, 2500)
+rc.SetM2VelocityPID(address, 400, 0, 0, 2500)
 
-rotation_target = 45
-desired_heading = get_latest_imu_data() + rotation_target
-
-start_time = time.time()
-PGAIN = 3
-# FIXME: use monotonic time
-while time.time() - start_time < 10:
-    imu_reading = get_latest_imu_data()
-    print(f"imu_reading: {imu_reading}")
-    angle_difference = desired_heading - imu_reading
-    print(f"angle_difference: {angle_difference}")
-    if abs(angle_difference) < 2.5:
-        break
-
-    turnpower = angle_difference * PGAIN
-    turnpower_m2 = -turnpower
-
-    print(f"turnpower: {turnpower}")
-    turnpower = max(-64, min(63, turnpower))
-    turnpower_m2 = max(-64, min(63, turnpower_m2))
-
-    final_power_m1 = int(turnpower + 64)
-    final_power_m2 = int(turnpower_m2 + 64)
-
-    print(f"final_power: {final_power_m1}")
-    print(f"final_power: {final_power_m2}")
-
-    rc.ForwardBackwardM1(address, final_power_m1)
-    rc.ForwardBackwardM2(address, final_power_m2)
-
-# FIXME: use monotonic time
-
-rc.ForwardBackwardM1(address, 64)
-rc.ForwardBackwardM2(address, 64)
+# move_robot_forward_time(rc, 1, address)
+rotate_robot(rc, -90, address)
+# move_robot_forward_time(rc, 10, address)
