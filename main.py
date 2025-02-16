@@ -1,17 +1,16 @@
 import cv2
 import numpy as np
 import time
-import math
 import torch
 import clip
 from ultralytics import YOLO
 from camera import StereoCamera
 from depth_estimation import DepthEstimator
-from scene_analysis import SceneAnalyzer
-from convex_db import ConvexDatabase
-# from semantic_search import SemanticSearch
-import json
+#from scene_analysis import SceneAnalyzer  # Disabled for performance
+#from convex_db import ConvexDatabase
+from semantic_search import SemanticSearch
 import argparse
+from PIL import Image
 
 # --------------------------------------------------
 # Parse Arguments
@@ -28,15 +27,12 @@ SIMILARITY_THRESHOLD = 0.25
 MAX_BOX_AREA_FRAC = 0.30
 CLOSE_THRESHOLD = 0.30
 MID_THRESHOLD = 0.80
-
-# Process only every nth frame to reduce latency
-FRAME_SKIP = 2
+FRAME_SKIP = 2  # Process every nth frame
 
 # --------------------------------------------------
 # Load Models: YOLOv8 and CLIP
 # --------------------------------------------------
 device = "cuda" if torch.cuda.is_available() else "cpu"
-# Use a smaller YOLO model variant for faster inference.
 yolo_model = YOLO("yolov8n.pt")
 clip_model, clip_preprocess = clip.load("ViT-B/32", device=device)
 with torch.no_grad():
@@ -49,39 +45,46 @@ with torch.no_grad():
 # --------------------------------------------------
 camera = StereoCamera(left_index=0, width=1920, height=1080)
 depth_estimator = DepthEstimator()
-# scene_analyzer = SceneAnalyzer()  # Uncomment if you need full scene analysis text.
-convex_db = ConvexDatabase()
-# semantic_search = SemanticSearch()
+# scene_analyzer = SceneAnalyzer()  # Disabled for performance
+# convex_db = ConvexDatabase()
+semantic_search = SemanticSearch()
 
 # --------------------------------------------------
-# Canvas Layout: 2x2 grid with 16:9 cells plus scene analysis box
-# Original grid: each cell was square (750x750). Now, each cell is wider.
+# Canvas Layout
+# --------------------------------------------------
+# Intermediate grid: 2x2 feeds, each feed 960x540 (16:9)
 GRID_COLS = 2
 GRID_ROWS = 2
-CELL_W = 750
-CELL_H = int(CELL_W * 9 / 16)  # approximately 422 pixels tall
-SCENE_BOX_H = 250
-LEFT_CANVAS_W = GRID_COLS * CELL_W        # 1500 px
-LEFT_CANVAS_H = (GRID_ROWS * CELL_H) + SCENE_BOX_H  # e.g. (2*422)+250 ≈ 1094 px
+CELL_W = 960   # 1920/2
+CELL_H = 540   # 16:9 aspect ratio for 960 width
+DASHBOARD_H = 250  # Space for dashboard below feeds
+LEFT_CANVAS_W = GRID_COLS * CELL_W           # = 1920
+LEFT_CANVAS_H = (GRID_ROWS * CELL_H) + DASHBOARD_H  # = 1080 + 250 = 1330
 
-# Scale entire output window 25% bigger
-FINAL_CANVAS_W = int(LEFT_CANVAS_W * 1.25)
-FINAL_CANVAS_H = int(LEFT_CANVAS_H * 1.25)
+# Final canvas: make window even bigger, e.g., 2560x1440
+FINAL_CANVAS_W = 2560
+FINAL_CANVAS_H = 1440
+
+cv2.namedWindow("CV Pipeline", cv2.WINDOW_NORMAL)
 
 frame_count = 0
+prev_time = time.time()
 
 # --------------------------------------------------
 # Main Loop
 # --------------------------------------------------
 while True:
     current_time = time.time()
+    dt = current_time - prev_time
+    fps = 1 / dt if dt > 0 else 0
+    prev_time = current_time
+
     left_frame, _ = camera.get_frames()
     if left_frame is None:
         print("No frame captured. Exiting...")
         break
 
     frame_count += 1
-    # Process only every FRAME_SKIP-th frame
     if frame_count % FRAME_SKIP != 0:
         continue
 
@@ -89,20 +92,23 @@ while True:
     frame_h, frame_w, _ = left_frame.shape
     frame_area = frame_w * frame_h
 
-    # --- (Optional) Scene Analysis using GPT-4 Vision mini ---
+    # --- (Optional) Scene Analysis ---
     # scene_desc = scene_analyzer.analyze(left_frame)
+    scene_desc = "Scene analysis disabled."
 
-    # --- Object Detection using YOLOv8 and CLIP filtering (only one target per frame) ---
-    if args.gui:
-        detection_frame = left_frame.copy()
-        classification_frame = left_frame.copy()
-    else:
-        detection_frame = left_frame.copy()
-        classification_frame = left_frame.copy()
+    # --- YOLO Object Detection ---
+    yolo_start = time.time()
+    yolo_results = yolo_model(left_frame)
+    yolo_time = (time.time() - yolo_start) * 1000.0  # in ms
+
+    detection_frame = left_frame.copy()
+    classification_frame = left_frame.copy()
     best_similarity = 0.0
     best_target_box = None
     combined_detections = []
-    yolo_results = yolo_model(left_frame)
+    clip_patches = []   # List of preprocessed patches (PIL images)
+    patch_info = []     # To keep track of bbox and index mapping
+
     for result in yolo_results:
         for box in result.boxes:
             coords = box.xyxy[0].tolist()  # [x1, y1, x2, y2]
@@ -119,44 +125,58 @@ while True:
                 "tags": [object_name.lower()]
             }
             combined_detections.append(detection_dict)
-            if args.gui:
-                cv2.rectangle(detection_frame, (x1, y1), (x2, y2), (0,255,0), 2)
+            # Draw detection rectangle on the detection frame.
+            cv2.rectangle(detection_frame, (x1, y1), (x2, y2), (0, 255, 0), 2)
+
+            # Extract and store the patch for CLIP processing.
             patch = left_frame[y1:y2, x1:x2]
             if patch.size == 0:
                 continue
             patch_rgb = cv2.cvtColor(patch, cv2.COLOR_BGR2RGB)
-            patch_rgb = cv2.resize(patch_rgb, (224,224))
-            from PIL import Image
+            patch_rgb = cv2.resize(patch_rgb, (224, 224))
             patch_img = Image.fromarray(patch_rgb)
-            patch_input = clip_preprocess(patch_img).unsqueeze(0).to(device)
-            with torch.no_grad():
-                patch_embedding = clip_model.encode_image(patch_input)
-                patch_embedding /= patch_embedding.norm(dim=-1, keepdim=True)
-                similarity = (patch_embedding @ target_text_embedding.T).item()
-            label_text = f"{object_name} {similarity:.2f}"
-            if args.gui:
-                cv2.putText(detection_frame, label_text, (x1, y1-10),
-                            cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0,255,0), 2)
-                cv2.putText(classification_frame, object_name, (x1, y1-10),
-                            cv2.FONT_HERSHEY_SIMPLEX, 1.0, (255,0,0), 3)
-            if similarity > SIMILARITY_THRESHOLD and similarity > best_similarity:
-                best_similarity = similarity
-                best_target_box = (x1, y1, x2, y2)
+            clip_patches.append(patch_img)
+            patch_info.append((len(combined_detections)-1, (x1, y1, x2, y2)))  # (index, bbox)
+
+    # --- Batch CLIP Inference for All Patches ---
+    clip_time = 0.0
+    if clip_patches:
+        clip_start = time.time()
+        batch_input = [clip_preprocess(img) for img in clip_patches]
+        batch_input = torch.stack(batch_input).to(device)
+        with torch.no_grad():
+            batch_embeddings = clip_model.encode_image(batch_input)
+            batch_embeddings /= batch_embeddings.norm(dim=-1, keepdim=True)
+            similarities = (batch_embeddings @ target_text_embedding.T).squeeze(1).cpu().tolist()
+        clip_time = (time.time() - clip_start) * 1000.0  # in ms
+
+        # Update detection dictionaries with CLIP similarity and draw labels.
+        for idx, bbox in patch_info:
+            sim = similarities.pop(0)
+            combined_detections[idx]["similarity"] = sim
+            x1, y1, x2, y2 = bbox
+            label_text = f"{combined_detections[idx]['class']} {sim:.2f}"
+            cv2.putText(detection_frame, label_text, (x1, y1 - 10),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 0), 2)
+            cv2.putText(classification_frame, combined_detections[idx]['class'], (x1, y1 - 10),
+                        cv2.FONT_HERSHEY_SIMPLEX, 1.0, (255, 0, 0), 3)
+            if sim > SIMILARITY_THRESHOLD and sim > best_similarity:
+                best_similarity = sim
+                best_target_box = bbox
+
     target_found = best_target_box is not None
     if target_found:
-        target_box = best_target_box
-        if args.gui:
-            tx1, ty1, tx2, ty2 = target_box
-            cv2.rectangle(detection_frame, (tx1, ty1), (tx2, ty2), (0,0,255), 3)
-            cv2.putText(detection_frame, f"X: {object_name} {best_similarity:.2f}", (tx1, ty1-10),
-                        cv2.FONT_HERSHEY_SIMPLEX, 1, (0,0,255), 3)
+        tx1, ty1, tx2, ty2 = best_target_box
+        cv2.rectangle(detection_frame, (tx1, ty1), (tx2, ty2), (0, 0, 255), 3)
+        cv2.putText(detection_frame, f"Target {best_similarity:.2f}", (tx1, ty1 - 10),
+                    cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 3)
 
-    # --- Depth Estimation using DPT ---
+    # --- Depth Estimation ---
     depth_map_vis, depth_map = depth_estimator.estimate_depth(left_frame)
     d_min, d_max = depth_map.min(), depth_map.max()
     norm_depth_map = (depth_map - d_min) / (d_max - d_min + 1e-6)
 
-    # --- Classification Feed: Overlay depth labels ---
+    # --- Overlay Depth Labels on Classification Feed ---
     for det in combined_detections:
         x1, y1, x2, y2 = det["bbox"]
         if x2 <= x1 or y2 <= y1:
@@ -166,18 +186,18 @@ while True:
             continue
         avg_depth = roi.mean()
         depth_label = "Close" if avg_depth < CLOSE_THRESHOLD else "Mid" if avg_depth < MID_THRESHOLD else "Far"
+        det["avg_depth"] = avg_depth
+        det["depth_label"] = depth_label
         label = f"{det['class']}: {depth_label}"
-        if args.gui:
-            cv2.rectangle(classification_frame, (x1, y1), (x2, y2), (255,0,0), 3)
-            cv2.putText(classification_frame, label, (x1, y2-10),
-                        cv2.FONT_HERSHEY_SIMPLEX, 1.2, (255,0,0), 3)
+        cv2.rectangle(classification_frame, (x1, y1), (x2, y2), (255, 0, 0), 3)
+        cv2.putText(classification_frame, label, (x1, y2 - 10),
+                    cv2.FONT_HERSHEY_SIMPLEX, 1.2, (255, 0, 0), 3)
 
     # --- Movement Command Decision ---
-    if target_found and target_box is not None:
-        tx1, ty1, tx2, ty2 = target_box
+    if target_found and best_target_box is not None:
+        tx1, ty1, tx2, ty2 = best_target_box
         roi_target = norm_depth_map[ty1:ty2, tx1:tx2]
         avg_depth_target = roi_target.mean() if roi_target.size > 0 else 1.0
-        # If the target is close, adjust turning to center the target.
         if avg_depth_target < CLOSE_THRESHOLD:
             target_center = (tx1 + tx2) / 2.0
             frame_center = frame_w / 2.0
@@ -194,49 +214,58 @@ while True:
     else:
         movement_cmd = "Turn Right 10°"
 
-    print(movement_cmd)
+    # --- Build Dashboard / Information Overlay ---
+    dashboard_box = np.ones((DASHBOARD_H, LEFT_CANVAS_W, 3), dtype=np.uint8) * 255
+    # Use black font for dashboard stats.
+    dashboard_lines = [
+        f"FPS: {fps:.1f}   Frame: {frame_count}",
+        f"YOLO Time: {yolo_time:.1f}ms   CLIP Time: {clip_time:.1f}ms",
+        f"Detections: {len(combined_detections)}",
+        f"Target Prompt: {TARGET_PROMPT}",
+        f"Command: {movement_cmd}"
+    ]
+    y_pos = 30
+    for line in dashboard_lines:
+        cv2.putText(dashboard_box, line, (20, y_pos),
+                    cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 0), 2)
+        y_pos += 40
+    cv2.putText(dashboard_box, "Detections:", (20, y_pos),
+                cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 0), 2)
+    y_pos += 30
+    for det in combined_detections[:5]:
+        line = (f"{det['class']} (Conf: {det['confidence']:.2f}, "
+                f"Sim: {det.get('similarity', 0):.2f}, Depth: {det.get('depth_label','N/A')})")
+        cv2.putText(dashboard_box, line, (20, y_pos),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 0, 0), 2)
+        y_pos += 30
+    if len(combined_detections) > 5:
+        extra = len(combined_detections) - 5
+        cv2.putText(dashboard_box, f"... and {extra} more", (20, y_pos),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 0, 0), 2)
 
-    # --- Build Scene Analysis Box ---
-    if args.gui:
-        scene_box = np.ones((SCENE_BOX_H, LEFT_CANVAS_W, 3), dtype=np.uint8) * 255
-        scene_lines = [
-            # Optionally include scene description:
-            # f"Scene: {scene_desc[:120]}...",
-            f"Target Seen: {'Yes' if target_found else 'No'}",
-            f"Command: {movement_cmd}",
-            f"Prompt: {TARGET_PROMPT}"
-        ]
-        y_pos = 40
-        for line in scene_lines:
-            cv2.putText(scene_box, line, (20, y_pos),
-                        cv2.FONT_HERSHEY_SIMPLEX, 1, (0,0,255), 2)
-            y_pos += 50
+    # --- Assemble the 2x2 Grid ---
+    grid_img = np.ones((GRID_ROWS * CELL_H, LEFT_CANVAS_W, 3), dtype=np.uint8)
+    raw_resized = cv2.resize(raw_frame, (CELL_W, CELL_H))
+    det_resized = cv2.resize(detection_frame, (CELL_W, CELL_H))
+    depth_resized = cv2.resize(depth_map_vis, (CELL_W, CELL_H))
+    class_resized = cv2.resize(classification_frame, (CELL_W, CELL_H))
+    grid_img[0:CELL_H, 0:CELL_W] = raw_resized
+    grid_img[0:CELL_H, CELL_W:LEFT_CANVAS_W] = det_resized
+    grid_img[CELL_H:2*CELL_H, 0:CELL_W] = depth_resized
+    grid_img[CELL_H:2*CELL_H, CELL_W:LEFT_CANVAS_W] = class_resized
 
-        # --- Assemble 2x2 Grid ---
-        grid_img = np.ones((GRID_ROWS * CELL_H, LEFT_CANVAS_W, 3), dtype=np.uint8) * 255
-        raw_resized = cv2.resize(raw_frame, (CELL_W, CELL_H))
-        det_resized = cv2.resize(detection_frame, (CELL_W, CELL_H))
-        depth_resized = cv2.resize(depth_map_vis, (CELL_W, CELL_H))
-        class_resized = cv2.resize(classification_frame, (CELL_W, CELL_H))
-        grid_img[0:CELL_H, 0:CELL_W] = raw_resized
-        grid_img[0:CELL_H, CELL_W:LEFT_CANVAS_W] = det_resized
-        grid_img[CELL_H:2*CELL_H, 0:CELL_W] = depth_resized
-        grid_img[CELL_H:2*CELL_H, CELL_W:LEFT_CANVAS_W] = class_resized
+    # --- Assemble Full Canvas (Grid on top, Dashboard at bottom) ---
+    left_canvas = np.ones((LEFT_CANVAS_H, LEFT_CANVAS_W, 3), dtype=np.uint8)
+    left_canvas[0:GRID_ROWS * CELL_H, :] = grid_img
+    left_canvas[GRID_ROWS * CELL_H:LEFT_CANVAS_H, :] = dashboard_box
 
-        left_canvas = np.ones((LEFT_CANVAS_H, LEFT_CANVAS_W, 3), dtype=np.uint8) * 255
-        left_canvas[0:GRID_ROWS * CELL_H, :] = grid_img
-        left_canvas[GRID_ROWS * CELL_H:LEFT_CANVAS_H, :] = scene_box
+    # --- Final Canvas: Scale to Final Resolution (2560x1440) ---
+    final_canvas = cv2.resize(left_canvas, (FINAL_CANVAS_W, FINAL_CANVAS_H))
 
-        # --- Scale final output 25% bigger ---
-        final_canvas = cv2.resize(left_canvas, (FINAL_CANVAS_W, FINAL_CANVAS_H))
-
-        cv2.imshow("CV Pipeline", final_canvas)
-        if cv2.waitKey(1) == 27:
-            break
-
-    #convex_db.insert_frame_data(time.time(), combined_detections, scene_desc, movement_cmd, mapping_info={})
+    cv2.imshow("CV Pipeline", final_canvas)
+    if cv2.waitKey(1) == 27:  # ESC key to exit.
+        break
 
 camera.release()
 if args.gui:
     cv2.destroyAllWindows()
-convex_db.close()
