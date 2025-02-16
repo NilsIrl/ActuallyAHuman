@@ -30,6 +30,7 @@ MAX_BOX_AREA_FRAC = 0.30
 CLOSE_THRESHOLD = 0.30
 MID_THRESHOLD = 0.80
 FRAME_SKIP = 2  # Process every nth frame
+SCALE = 1.25   # Scale entire window by 1.25
 
 # --------------------------------------------------
 # Load Models: YOLOv8 and CLIP
@@ -52,24 +53,29 @@ depth_estimator = DepthEstimator()
 semantic_search = SemanticSearch()
 
 # --------------------------------------------------
-# Canvas Layout Settings
+# Canvas Layout Settings (for 6 feeds)
 # --------------------------------------------------
-# Adjust feed dimensions: each feed is 920 x 517 (approx 16:9)
-GRID_COLS = 2
+GRID_COLS = 3
 GRID_ROWS = 2
-CELL_W = 920
-CELL_H = int(CELL_W * 9 / 16)  # ~517 px
-DASHBOARD_H = 350  # Taller dashboard so text isn't cut off
-LEFT_CANVAS_W = GRID_COLS * CELL_W          # 2*920 = 1840 px
-LEFT_CANVAS_H = (GRID_ROWS * CELL_H) + DASHBOARD_H  # (2*517)+350 = 1384 px
-
-# We will stream the output at its native resolution (1840 x 1384)
+CELL_W = 600
+CELL_H = int(CELL_W * 9 / 16)  # ~337 px
+DASHBOARD_H = 350              # Dashboard height for text overlay
+LEFT_CANVAS_W = GRID_COLS * CELL_W           # 3 * 600 = 1800 px
+LEFT_CANVAS_H = (GRID_ROWS * CELL_H) + DASHBOARD_H  # (2 * 337) + 350 = 1024 px
 FINAL_CANVAS_W = LEFT_CANVAS_W
 FINAL_CANVAS_H = LEFT_CANVAS_H
 
 # Global variable to hold the latest frame for streaming
 output_frame = None
 frame_lock = threading.Lock()
+
+# --------------------------------------------------
+# Helper Function to Add Feed Label
+# --------------------------------------------------
+def add_feed_label(img, label):
+    """Overlay a label at the top-left corner of the image."""
+    cv2.putText(img, label, (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 1.5, (255, 255, 255), 3)
+    return img
 
 # --------------------------------------------------
 # Vision Processing Loop
@@ -104,7 +110,7 @@ def vision_loop():
         # --- YOLO Object Detection ---
         yolo_start = time.time()
         yolo_results = yolo_model(left_frame)
-        yolo_time = (time.time() - yolo_start) * 1000.0  # ms
+        yolo_time = (time.time() - yolo_start) * 1000.0  # in ms
 
         detection_frame = left_frame.copy()
         classification_frame = left_frame.copy()
@@ -151,27 +157,27 @@ def vision_loop():
                 batch_embeddings = clip_model.encode_image(batch_input)
                 batch_embeddings /= batch_embeddings.norm(dim=-1, keepdim=True)
                 similarities = (batch_embeddings @ target_text_embedding.T).squeeze(1).cpu().tolist()
-            clip_time = (time.time() - clip_start) * 1000.0  # ms
+            clip_time = (time.time() - clip_start) * 1000.0  # in ms
 
             for idx, bbox in patch_info:
                 sim = similarities.pop(0)
                 combined_detections[idx]["similarity"] = sim
                 x1, y1, x2, y2 = bbox
                 label_text = f"{combined_detections[idx]['class']} {sim:.2f}"
+                # Larger text for BBX labels
                 cv2.putText(detection_frame, label_text, (x1, y1 - 10),
-                            cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 0), 2)
+                            cv2.FONT_HERSHEY_SIMPLEX, 1.5, (0, 255, 0), 3)
                 cv2.putText(classification_frame, combined_detections[idx]['class'], (x1, y1 - 10),
-                            cv2.FONT_HERSHEY_SIMPLEX, 1.0, (255, 0, 0), 3)
+                            cv2.FONT_HERSHEY_SIMPLEX, 1.5, (255, 0, 0), 3)
                 if sim > SIMILARITY_THRESHOLD and sim > best_similarity:
                     best_similarity = sim
                     best_target_box = bbox
 
-        target_found = best_target_box is not None
-        if target_found:
+        if best_target_box is not None:
             tx1, ty1, tx2, ty2 = best_target_box
             cv2.rectangle(detection_frame, (tx1, ty1), (tx2, ty2), (0, 0, 255), 3)
             cv2.putText(detection_frame, f"Target {best_similarity:.2f}", (tx1, ty1 - 10),
-                        cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 3)
+                        cv2.FONT_HERSHEY_SIMPLEX, 1.5, (0, 0, 255), 3)
 
         # --- Depth Estimation ---
         depth_map_vis, depth_map = depth_estimator.estimate_depth(left_frame)
@@ -193,10 +199,10 @@ def vision_loop():
             label = f"{det['class']}: {depth_label}"
             cv2.rectangle(classification_frame, (x1, y1), (x2, y2), (255, 0, 0), 3)
             cv2.putText(classification_frame, label, (x1, y2 - 10),
-                        cv2.FONT_HERSHEY_SIMPLEX, 1.2, (255, 0, 0), 3)
+                        cv2.FONT_HERSHEY_SIMPLEX, 1.5, (255, 0, 0), 3)
 
         # --- Movement Command Decision ---
-        if target_found and best_target_box is not None:
+        if best_target_box is not None:
             tx1, ty1, tx2, ty2 = best_target_box
             roi_target = norm_depth_map[ty1:ty2, tx1:tx2]
             avg_depth_target = roi_target.mean() if roi_target.size > 0 else 1.0
@@ -216,9 +222,21 @@ def vision_loop():
         else:
             movement_cmd = "Turn Right 10°"
 
+        # --- Additional Processed Feeds ---
+        # 1. Edge Detection (Canny)
+        edge_frame = cv2.Canny(left_frame, 50, 150)
+        edge_frame = cv2.cvtColor(edge_frame, cv2.COLOR_GRAY2BGR)
+        
+        # 2. Cartoonized Effect
+        gray = cv2.cvtColor(left_frame, cv2.COLOR_BGR2GRAY)
+        gray = cv2.medianBlur(gray, 5)
+        edges = cv2.adaptiveThreshold(gray, 255, cv2.ADAPTIVE_THRESH_MEAN_C,
+                                      cv2.THRESH_BINARY, 9, 9)
+        color = cv2.bilateralFilter(left_frame, 9, 300, 300)
+        cartoon_frame = cv2.bitwise_and(color, color, mask=edges)
+
         # --- Build Dashboard / Information Overlay ---
         dashboard_box = np.ones((DASHBOARD_H, LEFT_CANVAS_W, 3), dtype=np.uint8) * 255
-        # Use black font for stats.
         dashboard_lines = [
             f"FPS: {fps:.1f}   Frame: {frame_count}",
             f"YOLO Time: {yolo_time:.1f}ms   CLIP Time: {clip_time:.1f}ms",
@@ -229,48 +247,70 @@ def vision_loop():
         y_pos = 30
         for line in dashboard_lines:
             cv2.putText(dashboard_box, line, (20, y_pos),
-                        cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 0), 2)
+                        cv2.FONT_HERSHEY_SIMPLEX, 1.2, (0, 0, 0), 3)
             y_pos += 40
         cv2.putText(dashboard_box, "Detections:", (20, y_pos),
-                    cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 0), 2)
+                    cv2.FONT_HERSHEY_SIMPLEX, 1.2, (0, 0, 0), 3)
         y_pos += 30
         for det in combined_detections[:5]:
             line = (f"{det['class']} (Conf: {det['confidence']:.2f}, "
                     f"Sim: {det.get('similarity', 0):.2f}, Depth: {det.get('depth_label','N/A')})")
             cv2.putText(dashboard_box, line, (20, y_pos),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 0, 0), 2)
+                        cv2.FONT_HERSHEY_SIMPLEX, 1.0, (0, 0, 0), 3)
             y_pos += 30
         if len(combined_detections) > 5:
             extra = len(combined_detections) - 5
             cv2.putText(dashboard_box, f"... and {extra} more", (20, y_pos),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 0, 0), 2)
+                        cv2.FONT_HERSHEY_SIMPLEX, 1.0, (0, 0, 0), 3)
 
-        # --- Assemble the 2x2 Grid ---
+        # --- Assemble the 3x2 Grid ---
         grid_img = np.ones((GRID_ROWS * CELL_H, LEFT_CANVAS_W, 3), dtype=np.uint8)
+        # Resize each feed to fit in its cell and add a feed label
         raw_resized = cv2.resize(raw_frame, (CELL_W, CELL_H))
+        raw_resized = add_feed_label(raw_resized, "Raw Frame")
+
         det_resized = cv2.resize(detection_frame, (CELL_W, CELL_H))
+        det_resized = add_feed_label(det_resized, "Object Detection")
+
         depth_resized = cv2.resize(depth_map_vis, (CELL_W, CELL_H))
+        depth_resized = add_feed_label(depth_resized, "Depth Map")
+
         class_resized = cv2.resize(classification_frame, (CELL_W, CELL_H))
+        class_resized = add_feed_label(class_resized, "Classification")
+
+        edge_resized = cv2.resize(edge_frame, (CELL_W, CELL_H))
+        edge_resized = add_feed_label(edge_resized, "Edge Detection")
+
+        cartoon_resized = cv2.resize(cartoon_frame, (CELL_W, CELL_H))
+        cartoon_resized = add_feed_label(cartoon_resized, "OmNom Effect")
+
+        # Top row
         grid_img[0:CELL_H, 0:CELL_W] = raw_resized
-        grid_img[0:CELL_H, CELL_W:LEFT_CANVAS_W] = det_resized
-        grid_img[CELL_H:2*CELL_H, 0:CELL_W] = depth_resized
-        grid_img[CELL_H:2*CELL_H, CELL_W:LEFT_CANVAS_W] = class_resized
+        grid_img[0:CELL_H, CELL_W:2*CELL_W] = det_resized
+        grid_img[0:CELL_H, 2*CELL_W:3*CELL_W] = depth_resized
+        # Bottom row
+        grid_img[CELL_H:2*CELL_H, 0:CELL_W] = class_resized
+        grid_img[CELL_H:2*CELL_H, CELL_W:2*CELL_W] = edge_resized
+        grid_img[CELL_H:2*CELL_H, 2*CELL_W:3*CELL_W] = cartoon_resized
 
         # --- Assemble Full Canvas (Grid on top, Dashboard below) ---
         left_canvas = np.ones((LEFT_CANVAS_H, LEFT_CANVAS_W, 3), dtype=np.uint8)
         left_canvas[0:GRID_ROWS * CELL_H, :] = grid_img
         left_canvas[GRID_ROWS * CELL_H:LEFT_CANVAS_H, :] = dashboard_box
 
-        # Final output (no further scaling; streaming at native resolution)
         final_canvas = left_canvas.copy()
+
+        # --- Scale the Final Canvas ---
+        scaled_canvas = cv2.resize(final_canvas, (int(final_canvas.shape[1]*SCALE), int(final_canvas.shape[0]*SCALE)),
+                                   interpolation=cv2.INTER_LINEAR)
 
         # Update global output frame with thread locking.
         with frame_lock:
-            output_frame = final_canvas.copy()
+            output_frame = scaled_canvas.copy()
 
-        # Optionally also show locally if --gui flag is set.
+        # Optionally show locally if --gui flag is set.
         if args.gui:
-            cv2.imshow("CV Pipeline", final_canvas)
+            cv2.imshow("CV Pipeline", scaled_canvas)
             if cv2.waitKey(1) == 27:
                 break
 
@@ -308,5 +348,5 @@ def video_feed():
 if __name__ == '__main__':
     vision_thread = threading.Thread(target=vision_loop, daemon=True)
     vision_thread.start()
-    # Start Flask web server on port 5000 (accessible via http://<your-ip>:5000)
+    # Start Flask web server on port 5001 (accessible via http://<your-ip>:5001)
     app.run(host='0.0.0.0', port=5001, threaded=True)
