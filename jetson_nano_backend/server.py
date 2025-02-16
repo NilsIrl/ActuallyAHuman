@@ -61,7 +61,7 @@ async def websocket_endpoint(websocket: WebSocket):
                     # Only send ping if we don't have GPS data to send
                     await websocket.send_json({"type": "ping"})
                 
-                await asyncio.sleep(1)
+                await asyncio.sleep(0.1)
                 
             except Exception as e:
                 print(f"Error in WebSocket loop: {e}")

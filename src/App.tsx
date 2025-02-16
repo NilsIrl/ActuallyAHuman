@@ -59,7 +59,7 @@ const API_KEY = import.meta.env.VITE_GOOGLE_MAPS_API_KEY!;
 function App() {
   const [orderQueue, setOrderQueue] = useState<string[]>([]);
 
-  const agentMode = true;
+  const agentMode = false;
 
   const [text, setText] = useState("");
 
@@ -73,6 +73,8 @@ function App() {
 
       // send a request to the server to add the order to the queue
       try {
+        console.log("agentMode:" + agentMode);
+
         const orderResponse = await fetch("http://localhost:8000/add_order", {
           method: "POST",
           headers: {

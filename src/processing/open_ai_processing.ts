@@ -179,7 +179,7 @@ async function generate_order_instructions(order: string) {
         },
         {
           role: "user",
-          content: `Current location: ${latitude}, ${longitude}. Order: ${order}. Please use the current location as the starting point.`,
+          content: `Current location: ${latitude}, ${longitude}. Order: ${order}. Please use the current location as the starting point. Please use 37.424950518222445, -122.17637949085739 and your ending point"`,
         },
       ],
       response_format: zodResponseFormat(
