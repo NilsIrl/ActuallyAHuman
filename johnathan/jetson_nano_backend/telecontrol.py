@@ -2,7 +2,6 @@ import time
 import serial  # Change this line
 from roboclaw import Roboclaw
 from microservices_utils import rotate_robot, move_robot_forward_time, get_latest_imu_data
-import keyboard
 
 # Initialize Roboclaw
 try:
@@ -19,59 +18,69 @@ except Exception as e:
     print(f"Error initializing Roboclaw: {e}")
     exit(1)
 
-def print_controls():
-    print("\nTeleop Controls:")
-    print("W - Move Forward")
-    print("A - Turn Left")
-    print("D - Turn Right")
-    print("Q - Quit")
-    print("H - Show current heading")
-    print("? - Show this help message")
+def get_key():
+    import tty
+    import sys
+    import termios
+    
+    fd = sys.stdin.fileno()
+    old_settings = termios.tcgetattr(fd)
+    tty.setraw(sys.stdin.fileno())
+    ch = sys.stdin.read(1)
+    termios.tcsetattr(fd, termios.TCSADRAIN, old_settings)
+    return ch.lower()
 
 def main():
-    print_controls()
+    version = rc.ReadVersion(address)
+    if not version[0]:
+        print("GETVERSION Failed")
+    else:
+        print(repr(version[1]))
     
-    try:
-        while True:
-            if keyboard.is_pressed('w'):
-                print("Moving forward...")
-                move_robot_forward_time(rc, 0.5, address)  # Move forward 0.5 meters
-                time.sleep(0.1)  # Small delay to prevent repeated triggers
-                
-            elif keyboard.is_pressed('a'):
-                print("Turning left...")
-                rotate_robot(rc, -45, address)  # Turn left 45 degrees
-                time.sleep(0.1)
-                
-            elif keyboard.is_pressed('d'):
-                print("Turning right...")
-                rotate_robot(rc, 45, address)  # Turn right 45 degrees
-                time.sleep(0.1)
-                
-            elif keyboard.is_pressed('h'):
-                try:
-                    current_heading = get_latest_imu_data()
-                    print(f"Current heading: {current_heading:.2f} degrees")
-                except Exception as e:
-                    print(f"Error getting IMU data: {e}")
-                time.sleep(0.1)
-                
-            elif keyboard.is_pressed('?'):
-                print_controls()
-                time.sleep(0.1)
-                
-            elif keyboard.is_pressed('q'):
-                print("Quitting teleop control...")
-                break
-                
-    except KeyboardInterrupt:
-        print("\nProgram terminated by user")
-    except Exception as e:
-        print(f"An error occurred: {e}")
-    finally:
-        # Make sure motors are stopped
-        rc.ForwardBackwardM1(address, 64)
-        rc.ForwardBackwardM2(address, 64)
+    print("\nTeleop Controls:")
+    print("w - Move Forward")
+    print("a - Turn Left")
+    print("d - Turn Right")
+    print("q - Quit")
+    print("h - Show current heading")
+    print("? - Show this help message")
+    
+    while True:
+        key = get_key()
+        
+        if key == 'q':
+            print("Quitting...")
+            break
+        elif key == 'w':
+            print("Moving forward")
+            move_robot_forward_time(rc, 0.5, address)
+            time.sleep(0.1)
+        elif key == 'a':
+            print("Turning left")
+            rotate_robot(rc, -10, address)  # Turn left 45 degrees
+            time.sleep(0.1)
+        elif key == 'd':
+            print("Turning right")
+            rotate_robot(rc, 10, address)  # Turn right 45 degrees
+            time.sleep(0.1)
+        elif key == 'h':
+            print("Current heading: ...")
+            try:
+                current_heading = get_latest_imu_data()
+                print(f"Current heading: {current_heading:.2f} degrees")
+            except Exception as e:
+                print(f"Error getting IMU data: {e}")
+            time.sleep(0.1)
+        elif key == '?':
+            print("\nTeleop Controls:")
+            print("w - Move Forward")
+            print("a - Turn Left")
+            print("d - Turn Right")
+            print("q - Quit")
+            print("h - Show current heading")
+            print("? - Show this help message")
+        else:
+            print(f"Unknown command: {key}")
 
 if __name__ == "__main__":
     main()
