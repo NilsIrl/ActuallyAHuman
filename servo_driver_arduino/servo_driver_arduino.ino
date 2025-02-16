@@ -17,7 +17,9 @@ void setup() {
   extend.attach(EXTEND_PIN);
 
   pan.write(90);
-  extend.write(90);
+  // 100 is "in" position
+  // 60 is "out" position
+  extend.write(100);
 
   Serial.begin(9600);  
 }
