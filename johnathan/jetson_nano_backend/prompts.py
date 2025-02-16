@@ -16,26 +16,12 @@ actions = [
         },
         "description": "click on the screen at the given grid number"
     },
-    {
-        "name": "scroll",
-        "parameters": {
-            "direction": "str"
-        },
-        "description": "scroll up or down on the screen"
-    },
-    {
-        "name": "swipe",
-        "parameters": {
-            "direction": "str"
-        },
-        "description": "swipe left or right on the screen"
-    }
 ]
 
 def load_prompt():
     logging.info("[load_prompt]: Loading prompt from file")
     try:
-        with open("prompt.txt", "r") as file:
+        with open(__file__.replace("prompts.py", "prompt.txt"), "r") as file:
             temp_prompt = file.read()
         
         # Convert actions to a formatted string
@@ -61,7 +47,7 @@ def get_order():
     logging.info("[get_order]: Generating order")
     try:
         order = {
-            "name": "chicken wings",
+            "name": "burger",
             "quantity": 1
         }
         logging.info(f"[get_order]: Order created - {order}")

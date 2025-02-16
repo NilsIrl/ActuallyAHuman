@@ -1,4 +1,5 @@
 from typing import Optional
+import uuid
 import cv2
 import base64
 import numpy as np
@@ -40,6 +41,7 @@ def add_grid_to_image(frame: np.ndarray, rows: int = 10, cols: int = 10) -> np.n
     # Add numbers to cells
     font = cv2.FONT_HERSHEY_SIMPLEX
     font_scale = 0.5
+    mapping_from_cell_num_to_location = {}
     
     for i in range(rows):
         for j in range(cols):
@@ -51,9 +53,9 @@ def add_grid_to_image(frame: np.ndarray, rows: int = 10, cols: int = 10) -> np.n
             cv2.putText(output, str(cell_num), (x, y), font, font_scale, (0, 0, 0), 3)
             # Add white text
             cv2.putText(output, str(cell_num), (x, y), font, font_scale, (0, 255, 0), 1)
-    
+            mapping_from_cell_num_to_location[cell_num] = (j * cell_width, i * cell_height, (j + 1) * cell_width, (i + 1) * cell_height)
     logging.info("[add_grid_to_image]: Grid added successfully")
-    return output
+    return output, mapping_from_cell_num_to_location
 
 def compress_image(image: np.ndarray, target_resolution: tuple[int, int] = (720, 480)) -> np.ndarray:
     """Compress image to target resolution"""
@@ -64,46 +66,35 @@ def compress_image(image: np.ndarray, target_resolution: tuple[int, int] = (720,
         logging.error(f"[compress_image]: Error compressing image - {e}")
         raise
 
-def take_screenshot(compression: str = '720') -> Optional[str]:
+def take_screenshot() -> str:
     """Take a screenshot and return it as base64 string"""
-    logging.info(f"[take_screenshot]: Taking screenshot with {compression}p compression")
-    if compression not in ['480', '720', '1080']:
-        logging.error(f"[take_screenshot]: Invalid compression value - {compression}")
-        raise ValueError("compression must be one of: '480', '720', '1080'")
-    """Take a screenshot and return it as base64 string"""
-    try:
-        cap = cv2.VideoCapture(0)
-        ret, frame = cap.read()
-        cap.release()
-        
-        if not ret:
-            logging.error("[take_screenshot]: Failed to capture frame")
-            return None
-        
-        if compression == '480':
-            frame = compress_image(frame, (640, 480))
-        elif compression == '720':
-            frame = compress_image(frame, (1280, 720))
-        elif compression == '1080':
-            frame = compress_image(frame, (1920, 1080))
-        
-        # conver to rgb
-        frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-        
-        # Add grid overlay
-        frame_with_grid = add_grid_to_image(frame)
-        
-        # show the image
-        plt.imshow(frame_with_grid)
-        plt.show()
-        
-        # Convert to base64
-        _, buffer = cv2.imencode('.jpg', frame_with_grid)
-        
-        screenshot = base64.b64encode(buffer).decode('utf-8')
-        
-        logging.info("[take_screenshot]: Screenshot captured and processed successfully")
-        return screenshot
-    except Exception as e:
-        logging.error(f"[take_screenshot]: Error capturing screenshot - {e}")
-        return None
+
+    cap = cv2.VideoCapture(0)
+    ret, frame = cap.read()
+    cap.release()
+
+    print(ret)
+    assert ret
+    
+    # conver to rgb
+    frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+    
+    # Add grid overlay
+    print(frame.shape)
+    frame_with_grid, mapping_from_cell_num_to_location = add_grid_to_image(frame)
+    
+    # show the image
+    plt.imshow(frame_with_grid)
+    plt.show()
+    
+    # Convert to base64
+    _, buffer = cv2.imencode('.jpg', frame_with_grid)
+    # Save image to a random filename in /tmp
+    random_filename = f'/tmp/screenshot_{uuid.uuid4()}.jpg'
+    cv2.imwrite(random_filename, cv2.cvtColor(frame_with_grid, cv2.COLOR_RGB2BGR))
+    print(f"Saved screenshot to: {random_filename}")
+    
+    screenshot = base64.b64encode(buffer).decode('utf-8')
+    
+    logging.info("[take_screenshot]: Screenshot captured and processed successfully")
+    return frame, mapping_from_cell_num_to_location, screenshot

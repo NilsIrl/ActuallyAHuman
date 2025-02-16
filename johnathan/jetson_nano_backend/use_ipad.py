@@ -8,6 +8,7 @@ import asyncio
 import logging
 import json
 import uuid
+from microservices_utils import extend, initialize_arm, connect_to_arduino, pan_servo, set_arm_position
 # Configure logging
 logging.basicConfig(
     level=logging.INFO,
@@ -30,18 +31,6 @@ logging.basicConfig(
 # Swipe Left
 # Swipe Right
 
-def take_screenshot() -> Optional[str]:
-    """Take a screenshot and return it as base64 string"""
-    logging.info("[take_screenshot]: Taking screenshot")
-    try:
-        screenshot = utils.take_screenshot()
-        if screenshot:
-            logging.info("[take_screenshot]: Screenshot captured successfully")
-        return screenshot
-    except Exception as e:
-        logging.error(f"[take_screenshot]: Error - {e}")
-        return None
-
 def pass_screenshot_to_gpt(screenshot: str, conversation_id: Optional[str] = None) -> tuple[str, str]:
     """Pass screenshot to GPT and get response with conversation context"""
     logging.info("[pass_screenshot_to_gpt]: Sending screenshot to GPT")
@@ -61,36 +50,6 @@ def pass_screenshot_to_gpt(screenshot: str, conversation_id: Optional[str] = Non
     logging.warning("[pass_screenshot_to_gpt]: No response received")
     return None, conv_id
 
-def perform_action(action: str) -> bool:
-    """Perform the specified action on the iPad"""
-    
-    logging.info(f"[perform_action]: Attempting action - {action}")
-    
-    if action["action"] == "click":
-        # draw a circle on the image at the coordinates
-        screenshot = take_screenshot()
-        if screenshot:
-            screenshot = utils.add_grid_to_image(screenshot)
-            plt.imshow(screenshot)
-            plt.scatter(action["x"], action["y"], color="red", marker="o")
-            plt.show()
-    elif action["action"] == "scroll":
-        if action["direction"] == "up":
-            print("Scrolling up")
-            #utils.scroll_up()
-            
-        elif action["direction"] == "down":
-            print("Scrolling down")
-            #utils.scroll_down()
-    
-    try:
-        print(f"Performing action: {action}")
-        logging.info(f"[perform_action]: Action completed - {action}")
-        return True
-    except Exception as e:
-        logging.error(f"[perform_action]: Error performing action - {e}")
-        return False
-    
 def get_grid_coordinates(grid_number: int) -> tuple[int, int]:
     """Get the coordinates of the grid number"""
     logging.info(f"[get_grid_coordinates]: Getting coordinates for grid number - {grid_number}")
@@ -108,43 +67,86 @@ def get_grid_coordinates(grid_number: int) -> tuple[int, int]:
 
 def run_order():
     conversation_id = uuid.uuid4()
-    try:
-        screenshot = take_screenshot()
-        assert screenshot
+    frame, mapping_from_cell_num_to_location, screenshot = utils.take_screenshot()
+    assert screenshot
 
-        response, conversation_id = pass_screenshot_to_gpt(screenshot, conversation_id)
-        if response:
-            logging.info(f"[main]: Received response - {response}")
-            # attempt to parse as json
-            try:    
-                response = json.loads(response)
-                print(response)
-            except json.JSONDecodeError:
-                logging.error(f"[main]: Error parsing response as JSON - {response}")
-                
-            if response["action"] == "complete":
-                logging.info("[main]: Order complete")
-                return True
-            action = response["action"]
-            perform_action(action)
-                
-    except Exception as e:
-        logging.error(f"[main]: Error in main loop - {e}")
-        return False
+    response, conversation_id = pass_screenshot_to_gpt(screenshot, conversation_id)
+    response = json.loads(response)
+
+    print(response)
+    grid_number = response['action']['grid_number']
+    x, y, x_end, y_end = mapping_from_cell_num_to_location[grid_number]
+
+    tracker = cv2.TrackerMIL_create()
+    # ROI format for OpenCV is (x, y, width, height) as integers
+    roi = (int(x), int(y), int(x_end - x), int(y_end - y))
+    tracker.init(frame, roi)
+
+    cap = cv2.VideoCapture(0)
+    PX_GAIN = -0.01
+    PY_GAIN = 2
+    y_axis_control = initialize_arm()
+    x_axis_control = connect_to_arduino()
     
+    x_axis_pos = 0
+    y_axis_pos = y_axis_control.ReadEncM2(0x80)
+    assert y_axis_pos[0]
+    y_axis_pos = y_axis_pos[1]
+    
+    last_update_time = time.time()  # Add timestamp tracking
+    i = 0
 
+    # while True:
+    while True:
+        ret, frame = cap.read()
+        assert ret
+        success, box = tracker.update(frame)
+        # Draw the bounding box on the frame
+        if success:
+            # Box format is (x, y, width, height)
+            p1 = (int(box[0]), int(box[1]))
+            p2 = (int(box[0] + box[2]), int(box[1] + box[3]))
+            cv2.rectangle(frame, p1, p2, (0, 255, 0), 2)
+            
+            # Display the frame
+            # Save frame to random file location
+            random_filename = f'/tmp/tracking_frame_{uuid.uuid4()}.jpg'
+            cv2.imwrite(random_filename, frame)
+            print(f"Saved tracking frame to: {random_filename}")
+        # Calculate midpoints of bounding box
+        mid_x = (box[0] + box[2]) / 2
+        mid_y = (box[1] + box[3]) / 2
+
+        print(f"mid_x: {mid_x}, mid_y: {mid_y}")
+        x_diff = PX_GAIN * (mid_x - 832)
+        y_diff = PY_GAIN * (mid_y - 288)
+        print(f"x_diff: {x_diff}, y_diff: {y_diff}")
+
+        current_time = time.time()
+        if current_time - last_update_time >= 2:  # Only update if 2 seconds elapsed
+            i += 1
+            x_axis_pos += int(x_diff)
+            y_axis_pos += int(y_diff)
+
+            x_axis_pos = max(-60, min(60, x_axis_pos))
+
+            print("CANARY")
+            print(f"x_axis_pos: {x_axis_pos}, y_axis_pos: {y_axis_pos}")
+            set_arm_position(y_axis_control, y_axis_pos)
+            pan_servo(x_axis_control, x_axis_pos)
+            last_update_time = current_time  # Update the timestamp
+            if i == 10:
+                break
+
+    extend(x_axis_control)
+
+    return frame, response
 
 
 def main():
     logging.info("[main]: Starting iPad automation")
-    Flag = True
-    while Flag:
-        Flag = run_order()
-        
-        time.sleep(1)
+    run_order()
+
 
 if __name__ == "__main__":
     main()
-
-
-

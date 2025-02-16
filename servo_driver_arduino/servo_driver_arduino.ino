@@ -25,16 +25,17 @@ void setup() {
 }
 
 void loop() {
-  // put your main code here, to run repeatedly:
-  int selector = Serial.read();
-  int value = Serial.read();
+  if (Serial.available() >= 2) {  // Check if we have at least 2 bytes available
+    int selector = Serial.read();
+    int value = Serial.read();
 
-  switch (selector) {
-    case 1:
-      pan.write(value);
-      break;
-    case 2:
-      extend.write(value);
-      break;
+    switch (selector) {
+      case 1:
+        pan.write(value);
+        break;
+      case 2:
+        extend.write(value);
+        break;
+    }
   }
 }

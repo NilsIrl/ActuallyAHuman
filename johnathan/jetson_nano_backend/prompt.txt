@@ -16,8 +16,6 @@ If the order is complete, respond with:
 
 If the order is not complete, respond with one of these actions:
 1. For clicking: {{"action": "click", "grid_number": <grid_number>}}
-2. For scrolling: {{"action": "scroll", "direction": "up"}} or {{"action": "scroll", "direction": "down"}}
-3. For swiping: {{"action": "swipe", "direction": "left"}} or {{"action": "swipe", "direction": "right"}}
 
 The screen is overlaid with a numbered grid to help you specify click locations.
 Always respond in this format:

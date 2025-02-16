@@ -222,7 +222,7 @@ def retract(arduino_serial) -> None:
     _control_servo(arduino_serial, 2, 100)
 
 
-def initialize_arm() -> None:
+def initialize_arm():
     """
     Initializes the arm's roboclaw controller with the necessary settings.
     
@@ -231,6 +231,7 @@ def initialize_arm() -> None:
         address: Roboclaw address (default: 0x80)
     """
     rc = Roboclaw("/dev/serial/by-path/platform-3610000.usb-usb-0:2.2:1.0", 115200)
+    rc.Open()
     address = 0x80
     # Reset encoders to 0 (assuming arm is at bottom position)
     rc.ResetEncoders(address)
@@ -241,6 +242,7 @@ def initialize_arm() -> None:
 
     # Ensure motor is stopped
     rc.ForwardM2(address, 0)
+    return rc
 
 def set_arm_position(rc, position: int) -> None:
     """
