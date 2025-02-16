@@ -10,22 +10,25 @@ from depth_estimation import DepthEstimator
 from scene_analysis import SceneAnalyzer
 from convex_db import ConvexDatabase
 from semantic_search import SemanticSearch
-#from visual_mapping import FloorplanMapper  # Commented out as requested
 import json
 
 # --------------------------------------------------
 # Configuration
 # --------------------------------------------------
-TARGET_PROMPT = "vitamin water"
+TARGET_PROMPT = "grey ipad"
 SIMILARITY_THRESHOLD = 0.25
 MAX_BOX_AREA_FRAC = 0.30
 CLOSE_THRESHOLD = 0.30
 MID_THRESHOLD = 0.80
 
+# Process only every nth frame to reduce latency
+FRAME_SKIP = 2
+
 # --------------------------------------------------
 # Load Models: YOLOv8 and CLIP
 # --------------------------------------------------
 device = "cuda" if torch.cuda.is_available() else "cpu"
+# Use a smaller YOLO model variant for faster inference.
 yolo_model = YOLO("yolov8n.pt")
 clip_model, clip_preprocess = clip.load("ViT-B/32", device=device)
 with torch.no_grad():
@@ -38,26 +41,26 @@ with torch.no_grad():
 # --------------------------------------------------
 camera = StereoCamera(left_index=0, width=1920, height=1080)
 depth_estimator = DepthEstimator()
-scene_analyzer = SceneAnalyzer()
+#scene_analyzer = SceneAnalyzer()
 convex_db = ConvexDatabase()
 semantic_search = SemanticSearch()
-# FloorplanMapper is commented out per request:
-# LEFT_CANVAS_W = 1500
-# LEFT_CANVAS_H = 1750
-# floorplan_mapper = FloorplanMapper(map_width=LEFT_CANVAS_W, map_height=LEFT_CANVAS_H, scale=100)
 
 # --------------------------------------------------
-# Canvas Layout: Left Canvas only (2x2 grid + scene analysis box)
-# --------------------------------------------------
+# Canvas Layout: 2x2 grid with 16:9 cells plus scene analysis box
+# Original grid: each cell was square (750x750). Now, each cell is wider.
 GRID_COLS = 2
 GRID_ROWS = 2
 CELL_W = 750
-CELL_H = 750
+CELL_H = int(CELL_W * 9 / 16)  # approximately 422 pixels tall
 SCENE_BOX_H = 250
-LEFT_CANVAS_W = GRID_COLS * CELL_W         # 1500 px
-LEFT_CANVAS_H = (GRID_ROWS * CELL_H) + SCENE_BOX_H  # 1500 + 250 = 1750 px
-FINAL_CANVAS_W = LEFT_CANVAS_W  # Now using only the left canvas
-FINAL_CANVAS_H = LEFT_CANVAS_H
+LEFT_CANVAS_W = GRID_COLS * CELL_W        # 1500 px
+LEFT_CANVAS_H = (GRID_ROWS * CELL_H) + SCENE_BOX_H  # e.g. (2*422)+250 ≈ 1094 px
+
+# Scale entire output window 25% bigger
+FINAL_CANVAS_W = int(LEFT_CANVAS_W * 1.25)
+FINAL_CANVAS_H = int(LEFT_CANVAS_H * 1.25)
+
+frame_count = 0
 
 # --------------------------------------------------
 # Main Loop
@@ -68,12 +71,18 @@ while True:
     if left_frame is None:
         print("No frame captured. Exiting...")
         break
+
+    frame_count += 1
+    # Process only every FRAME_SKIP-th frame
+    if frame_count % FRAME_SKIP != 0:
+        continue
+
     raw_frame = left_frame.copy()
     frame_h, frame_w, _ = left_frame.shape
     frame_area = frame_w * frame_h
 
     # --- Scene Analysis using GPT-4 Vision mini ---
-    scene_desc = scene_analyzer.analyze(left_frame)
+    #scene_desc = scene_analyzer.analyze(left_frame)
 
     # --- Object Detection using YOLOv8 and CLIP filtering (only one target per frame) ---
     detection_frame = left_frame.copy()
@@ -156,10 +165,10 @@ while True:
     else:
         movement_cmd = "Turn Right 10°"
 
-    # --- Build Scene Analysis Box (Full-width rectangle) ---
+    # --- Build Scene Analysis Box ---
     scene_box = np.ones((SCENE_BOX_H, LEFT_CANVAS_W, 3), dtype=np.uint8) * 255
     scene_lines = [
-        f"Scene: {scene_desc[:120]}...",
+        #f"Scene: {scene_desc[:120]}...",
         f"Target Seen: {'Yes' if target_found else 'No'}",
         f"Command: {movement_cmd}",
         f"Prompt: {TARGET_PROMPT}"
@@ -185,10 +194,10 @@ while True:
     left_canvas[0:GRID_ROWS * CELL_H, :] = grid_img
     left_canvas[GRID_ROWS * CELL_H:LEFT_CANVAS_H, :] = scene_box
 
-    # --- Final Canvas: Only Left Canvas (without semantic mapping) ---
-    final_canvas = left_canvas.copy()
+    # --- Scale final output 25% bigger ---
+    final_canvas = cv2.resize(left_canvas, (FINAL_CANVAS_W, FINAL_CANVAS_H))
 
-    convex_db.insert_frame_data(time.time(), combined_detections, scene_desc, movement_cmd, mapping_info={})
+    #convex_db.insert_frame_data(time.time(), combined_detections, scene_desc, movement_cmd, mapping_info={})
 
     cv2.imshow("CV Pipeline", final_canvas)
     if cv2.waitKey(1) == 27:

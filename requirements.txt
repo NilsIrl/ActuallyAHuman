@@ -1,3 +1,4 @@
+pyserial
 torch
 ultralytics
 transformers
