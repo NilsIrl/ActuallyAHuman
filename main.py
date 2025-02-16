@@ -49,7 +49,7 @@ with torch.no_grad():
 # --------------------------------------------------
 camera = StereoCamera(left_index=0, width=1920, height=1080)
 depth_estimator = DepthEstimator()
-#scene_analyzer = SceneAnalyzer()
+# scene_analyzer = SceneAnalyzer()  # Uncomment if you need full scene analysis text.
 convex_db = ConvexDatabase()
 # semantic_search = SemanticSearch()
 
@@ -89,11 +89,14 @@ while True:
     frame_h, frame_w, _ = left_frame.shape
     frame_area = frame_w * frame_h
 
-    # --- Scene Analysis using GPT-4 Vision mini ---
-    #scene_desc = scene_analyzer.analyze(left_frame)
+    # --- (Optional) Scene Analysis using GPT-4 Vision mini ---
+    # scene_desc = scene_analyzer.analyze(left_frame)
 
     # --- Object Detection using YOLOv8 and CLIP filtering (only one target per frame) ---
     if args.gui:
+        detection_frame = left_frame.copy()
+        classification_frame = left_frame.copy()
+    else:
         detection_frame = left_frame.copy()
         classification_frame = left_frame.copy()
     best_similarity = 0.0
@@ -174,16 +177,31 @@ while True:
         tx1, ty1, tx2, ty2 = target_box
         roi_target = norm_depth_map[ty1:ty2, tx1:tx2]
         avg_depth_target = roi_target.mean() if roi_target.size > 0 else 1.0
-        movement_cmd = "STOP" if avg_depth_target < CLOSE_THRESHOLD else "Straight"
+        # If the target is close, adjust turning to center the target.
+        if avg_depth_target < CLOSE_THRESHOLD:
+            target_center = (tx1 + tx2) / 2.0
+            frame_center = frame_w / 2.0
+            horizontal_error = target_center - frame_center
+            error_threshold = 50  # pixels
+            if abs(horizontal_error) < error_threshold:
+                movement_cmd = "STOP"
+            elif horizontal_error > 0:
+                movement_cmd = "Turn Right"
+            else:
+                movement_cmd = "Turn Left"
+        else:
+            movement_cmd = "Straight"
     else:
         movement_cmd = "Turn Right 10°"
+
     print(movement_cmd)
 
     # --- Build Scene Analysis Box ---
     if args.gui:
         scene_box = np.ones((SCENE_BOX_H, LEFT_CANVAS_W, 3), dtype=np.uint8) * 255
         scene_lines = [
-            #f"Scene: {scene_desc[:120]}...",
+            # Optionally include scene description:
+            # f"Scene: {scene_desc[:120]}...",
             f"Target Seen: {'Yes' if target_found else 'No'}",
             f"Command: {movement_cmd}",
             f"Prompt: {TARGET_PROMPT}"
