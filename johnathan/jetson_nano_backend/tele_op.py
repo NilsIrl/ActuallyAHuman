@@ -6,6 +6,7 @@ class RobotTeleop:
         self.running = True
         self.current_keys = set()
         print("Robot Teleop initialized. Use WASD for movement, E/Q for lift control.")
+        print("J to pan left, K to poke")
         print("Press Ctrl+C to exit")
 
     def on_press(self, key):
@@ -58,6 +59,25 @@ class RobotTeleop:
         print("Stopping")
         # Implement robot-specific stop command here
 
+    def pan_left(self):
+        """Pan robot left"""
+        print("Panning left")
+        # Implement robot-specific pan left here
+    def pan_right(self):
+        """Pan robot right"""
+        print("Panning right")
+        # Implement robot-specific pan right here
+
+    def poke(self):
+        """Poke action"""
+        print("Poking")
+        # Implement robot-specific poke action here
+    
+    def retract(self):
+        """Retract action"""
+        print("Retracting")
+        # Implement robot-specific retract action here
+
     def run(self):
         with keyboard.Listener(
             on_press=self.on_press,
@@ -77,6 +97,14 @@ class RobotTeleop:
                         self.lift_up()
                     elif 'q' in self.current_keys:
                         self.lift_down()
+                    elif 'j' in self.current_keys:
+                        self.pan_left()
+                    elif 'k' in self.current_keys:
+                        self.pan_right()
+                    elif 'l' in self.current_keys:
+                        self.poke()
+                    elif 'm' in self.current_keys:
+                        self.retract()
                     else:
                         self.stop()
                     time.sleep(0.1)
