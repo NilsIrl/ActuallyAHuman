@@ -2,6 +2,7 @@ import { useEffect, useState, useRef } from "react";
 import MapView from "./MapView";
 import { generate_order_instructions } from "./processing/open_ai_processing";
 import { generateWaypoints } from "./processing/generate-waypoints";
+import { LoadScript } from "@react-google-maps/api";
 
 interface OrderItemProps {
   orderNumber: number;
@@ -118,27 +119,54 @@ function App() {
 
   return (
     <div className="max-w-2xl mx-auto bg-white shadow-md rounded-md p-6 mt-10">
-
-      <h1 className="text-3xl font-bold mb-4 text-center">Order on OmNom</h1>
-      <input
-        type="text"
-        placeholder="Enter your order"
-        value={text}
-        onChange={(e) => setText(e.target.value)}
-        onKeyDown={(e) => {
-          if (e.key === "Enter") {
-            handleSubmit(e);
-          }
-        }}
-        className="w-full border-2 border-gray-300 rounded-md p-2 mb-4"
-      />
-      {error && (
-        <div className="text-red-500 mb-4 p-2 bg-red-100 rounded">{error}</div>
-      )}
-      {orderQueue.length > 0 ? (
-        orderQueue.length > 1 ? (
-          <div className="flex gap-4">
-            <div className="flex-1">
+      <LoadScript
+        googleMapsApiKey={API_KEY}
+        loadingElement={<div>Loading Maps...</div>}
+      >
+        <h1 className="text-3xl font-bold mb-4 text-center">Order on OmNom</h1>
+        <input
+          type="text"
+          placeholder="Enter your order"
+          value={text}
+          onChange={(e) => setText(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") {
+              handleSubmit(e);
+            }
+          }}
+          className="w-full border-2 border-gray-300 rounded-md p-2 mb-4"
+        />
+        {error && (
+          <div className="text-red-500 mb-4 p-2 bg-red-100 rounded">
+            {error}
+          </div>
+        )}
+        {orderQueue.length > 0 ? (
+          orderQueue.length > 1 ? (
+            <div className="flex gap-4">
+              <div className="flex-1">
+                <h2 className="text-xl font-semibold mb-2">Current Order</h2>
+                <OrderItem
+                  orderNumber={1}
+                  text={orderQueue[0]}
+                  active
+                />
+              </div>
+              <div className="flex-1">
+                <h2 className="text-xl font-semibold mb-2">Upcoming Orders</h2>
+                <div className="space-y-2">
+                  {orderQueue.slice(1).map((order, index) => (
+                    <OrderItem
+                      key={index}
+                      orderNumber={index + 2}
+                      text={order}
+                    />
+                  ))}
+                </div>
+              </div>
+            </div>
+          ) : (
+            <div>
               <h2 className="text-xl font-semibold mb-2">Current Order</h2>
               <OrderItem
                 orderNumber={1}
@@ -146,35 +174,14 @@ function App() {
                 active
               />
             </div>
-            <div className="flex-1">
-              <h2 className="text-xl font-semibold mb-2">Upcoming Orders</h2>
-              <div className="space-y-2">
-                {orderQueue.slice(1).map((order, index) => (
-                  <OrderItem
-                    key={index}
-                    orderNumber={index + 2}
-                    text={order}
-                  />
-                ))}
-              </div>
-            </div>
-          </div>
+          )
         ) : (
-          <div>
-            <h2 className="text-xl font-semibold mb-2">Current Order</h2>
-            <OrderItem
-              orderNumber={1}
-              text={orderQueue[0]}
-              active
-            />
-          </div>
-        )
-      ) : (
-        <div className="text-center text-gray-500">No orders in queue</div>
-      )}
-      <div className="mt-6 h-[500px] w-full border border-gray-300 rounded-md overflow-hidden">
-        <MapView />
-      </div>
+          <div className="text-center text-gray-500">No orders in queue</div>
+        )}
+        <div className="mt-6 h-[500px] w-full border border-gray-300 rounded-md overflow-hidden">
+          <MapView />
+        </div>
+      </LoadScript>
     </div>
   );
 }

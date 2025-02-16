@@ -1,10 +1,5 @@
-import React, { useState, useEffect, useRef } from "react";
-import {
-  GoogleMap,
-  DirectionsRenderer,
-  Marker,
-  LoadScript,
-} from "@react-google-maps/api";
+import React, { useState, useEffect, useRef, useCallback } from "react";
+import { GoogleMap, DirectionsRenderer, Marker } from "@react-google-maps/api";
 import { getLocation } from "./processing/open_ai_processing";
 
 const containerStyle = {
@@ -36,52 +31,74 @@ const MapView: React.FC = () => {
   const wsRef = useRef<WebSocket | null>(null);
   const [locationError, setLocationError] = useState<string | null>(null);
 
+  const [currentPoints, setCurrentPoints] = useState<LatLng[]>([]);
+
+  // Separate WebSocket effect from map initialization
+
+  const checkPointValidity = (point: LatLng) => {
+    return (
+      point.lat !== undefined &&
+      point.lng !== undefined &&
+      point.lat !== null &&
+      point.lng !== null &&
+      !isNaN(point.lat) &&
+      !isNaN(point.lng) &&
+      point.lat !== Infinity &&
+      point.lng !== Infinity &&
+      point.lat !== -Infinity &&
+      point.lng !== -Infinity &&
+      point.lat < 90 &&
+      point.lat > -90 &&
+      point.lng < 180 &&
+      point.lng > -180
+    );
+  };
+
   useEffect(() => {
+    const reconnectDelay = [1000, 2000, 4000, 8000, 16000]; // Exponential backoff
     let reconnectAttempt = 0;
-    const maxReconnectAttempts = 5;
-    const reconnectDelay = 1000; // 1 second
 
     const connectWebSocket = () => {
+      if (reconnectAttempt >= reconnectDelay.length) {
+        console.log("Max reconnection attempts reached");
+        return;
+      }
+
       console.log("Attempting to connect to WebSocket...");
       wsRef.current = new WebSocket("ws://localhost:8000/ws");
 
       wsRef.current.onopen = () => {
         console.log("WebSocket connection established");
-        reconnectAttempt = 0; // Reset reconnect attempts on successful connection
+        reconnectAttempt = 0; // Reset on successful connection
       };
 
       wsRef.current.onmessage = (event) => {
         const data = JSON.parse(event.data);
+        if (data.type === "ping") return;
 
-        // Skip ping messages
-        if (data.type === "ping") {
-          return;
-        }
+        // ensure valid longitude and latitude
 
-        // Only process messages with GPS coordinates
-        if (data.latitude !== undefined && data.longitude !== undefined) {
-          setGpsData((prevData) => [
-            ...prevData,
-            { lat: data.latitude, lng: data.longitude },
-          ]);
+        if (checkPointValidity({ lat: data.latitude, lng: data.longitude })) {
+          setGpsData((prevData) => {
+            const newData = [
+              ...prevData,
+              { lat: data.latitude, lng: data.longitude },
+            ];
+            return newData.slice(-50);
+          });
+          
           setCurrentLocation({ lat: data.latitude, lng: data.longitude });
-          if (mapRef.current && currentLocation) {
-            mapRef.current.panTo(currentLocation);
-          }
+        } else {
+          console.log("Invalid point:", data);
         }
       };
 
-      wsRef.current.onclose = (event) => {
-        console.log("WebSocket closed:", event);
-        if (reconnectAttempt < maxReconnectAttempts) {
-          console.log(
-            `Attempting to reconnect... (${
-              reconnectAttempt + 1
-            }/${maxReconnectAttempts})`
-          );
-          setTimeout(connectWebSocket, reconnectDelay);
-          reconnectAttempt++;
-        }
+      wsRef.current.onclose = () => {
+        console.log(
+          `WebSocket closed. Reconnecting in ${reconnectDelay[reconnectAttempt]}ms...`
+        );
+        setTimeout(connectWebSocket, reconnectDelay[reconnectAttempt]);
+        reconnectAttempt++;
       };
 
       wsRef.current.onerror = (error) => {
@@ -91,42 +108,42 @@ const MapView: React.FC = () => {
 
     connectWebSocket();
 
-    // Cleanup function
     return () => {
       if (wsRef.current) {
         wsRef.current.close();
       }
     };
-  }, []); // Empty dependency array since we want this to run once
+  }, []);
 
+  // Separate effect for handling map updates when location changes
+  useEffect(() => {
+    if (!mapRef.current || !currentLocation) return;
+    mapRef.current.panTo(currentLocation);
+  }, [currentLocation]);
+
+  // Initial location setup
   useEffect(() => {
     const getInitialLocation = async () => {
       try {
         setLocationError(null);
         const position = await getLocation();
-        console.log("Found position:", position);
-        if (!position) {
-          throw new Error("Location not found");
-        }
+
         const userLocation = {
           lat: position.coords.latitude,
           lng: position.coords.longitude,
         };
         setCurrentLocation(userLocation);
 
+        // Only update map if it's mounted
         if (mapRef.current) {
           mapRef.current.panTo(userLocation);
           mapRef.current.setZoom(15);
         }
       } catch (error) {
         console.error("Error getting initial location:", error);
-        if (error instanceof Error) {
-          setLocationError(error.message);
-        } else {
-          setLocationError(
-            "Unable to get your location. Please check your browser settings."
-          );
-        }
+        setLocationError(
+          error instanceof Error ? error.message : "Unable to get your location"
+        );
       }
     };
 
@@ -153,14 +170,16 @@ const MapView: React.FC = () => {
     }
   }, [origin, destination]);
 
-  const onLoad = (map: google.maps.Map) => {
-    mapRef.current = map;
-    // If we already have the current location, pan to it
-    if (currentLocation) {
-      map.panTo(currentLocation);
-      map.setZoom(15);
-    }
-  };
+  const onLoad = useCallback(
+    (map: google.maps.Map) => {
+      mapRef.current = map;
+      if (currentLocation) {
+        map.panTo(currentLocation);
+        map.setZoom(15);
+      }
+    },
+    [currentLocation]
+  );
 
   const onUnmount = () => {
     mapRef.current = null;
@@ -168,47 +187,45 @@ const MapView: React.FC = () => {
 
   return (
     <div className="w-full h-full relative">
-      <LoadScript googleMapsApiKey={API_KEY}>
-        <GoogleMap
-          mapContainerStyle={containerStyle}
-          center={currentLocation || center}
-          zoom={14}
-          onLoad={onLoad}
-          onUnmount={onUnmount}
-        >
-          {directions && <DirectionsRenderer directions={directions} />}
+      <GoogleMap
+        mapContainerStyle={containerStyle}
+        center={currentLocation || center}
+        zoom={14}
+        onLoad={onLoad}
+        onUnmount={onUnmount}
+      >
+        {directions && <DirectionsRenderer directions={directions} />}
 
-          {gpsData.map((point, index) => (
-            <Marker
-              key={index}
-              position={point}
-              icon={{
-                path: window.google.maps.SymbolPath.CIRCLE,
-                scale: 4,
-                fillColor: "blue",
-                fillOpacity: 0.8,
-                strokeColor: "blue",
-                strokeOpacity: 0.8,
-              }}
-            />
-          ))}
+        {gpsData.map((point, index) => (
+          <Marker
+            key={index}
+            position={point}
+            icon={{
+              path: window.google.maps.SymbolPath.CIRCLE,
+              scale: 4,
+              fillColor: "blue",
+              fillOpacity: 0.8,
+              strokeColor: "blue",
+              strokeOpacity: 0.8,
+            }}
+          />
+        ))}
 
-          {currentLocation && (
-            <Marker
-              position={currentLocation}
-              icon={{
-                path: google.maps.SymbolPath.CIRCLE,
-                scale: 8,
-                fillColor: "#4285F4",
-                fillOpacity: 1,
-                strokeColor: "#ffffff",
-                strokeWeight: 2,
-              }}
-              title="Your Location"
-            />
-          )}
-        </GoogleMap>
-      </LoadScript>
+        {currentLocation && (
+          <Marker
+            position={currentLocation}
+            icon={{
+              path: google.maps.SymbolPath.CIRCLE,
+              scale: 8,
+              fillColor: "#4285F4",
+              fillOpacity: 1,
+              strokeColor: "#ffffff",
+              strokeWeight: 2,
+            }}
+            title="Your Location"
+          />
+        )}
+      </GoogleMap>
 
       {locationError && (
         <div className="absolute top-4 right-4 bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded">
@@ -216,6 +233,16 @@ const MapView: React.FC = () => {
           <p>{locationError}</p>
         </div>
       )}
+
+      <div className="absolute top-4 left-4 bg-white p-4 rounded shadow">
+        {gpsData.map((point, index) => (
+          <div key={index}>
+            <p>Point {index + 1}</p>
+            <p>Latitude: {point.lat}</p>
+            <p>Longitude: {point.lng}</p>
+          </div>
+        ))}
+      </div>
 
       {/* <div className="absolute top-4 left-4 bg-white p-4 rounded shadow">
         {!currentLocation && !locationError && (

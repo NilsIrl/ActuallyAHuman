@@ -48,13 +48,15 @@ async def websocket_endpoint(websocket: WebSocket):
             try:
                 if global_state.current_waypoints:
                     print(f"Processing waypoint: {global_state.current_waypoints[0]}")
-                    latitude = global_state.current_waypoints[0][0]
-                    longitude = global_state.current_waypoints[0][1]
+                    # Waypoints are stored as [longitude, latitude], but we need to send as {latitude, longitude}
+                    longitude = global_state.current_waypoints[0][0]
+                    latitude = global_state.current_waypoints[0][1]
                     global_state.current_waypoints.pop(0)
                     gps_data = {"latitude": latitude, "longitude": longitude}
 
                     print(f"Sending GPS data: {gps_data}")
                     await websocket.send_json(gps_data)
+                    
                 else:
                     # Only send ping if we don't have GPS data to send
                     await websocket.send_json({"type": "ping"})
