@@ -1,2 +1,36 @@
 @import "tailwindcss";
 @layer base, layer, components, utilities;
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+body {
+  @apply bg-green-50;
+  @apply text-green-900;
+  -ms-overflow-style: none; /* IE and Edge */
+  scrollbar-width: none; /* Firefox */
+}
+
+html {
+  @apply bg-green-50;
+}
+
+/* Hide scrollbar for Chrome, Safari and Opera */
+::-webkit-scrollbar {
+  display: none;
+}
+
+/* Remove the previous scrollbar styling */
+/* ::-webkit-scrollbar-track {
+  @apply bg-green-50;
+}
+
+::-webkit-scrollbar-thumb {
+  @apply bg-green-300;
+  @apply rounded-full;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  @apply bg-green-400;
+} */

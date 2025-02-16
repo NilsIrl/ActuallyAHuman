@@ -48,8 +48,10 @@ async function generateWaypoints(
   const routeCoords: Coordinates[] = data.features[0].geometry.coordinates;
 
   // Sample waypoints along the route
-  const step = Math.max(1, Math.floor(routeCoords.length / numWaypoints));
-  const waypoints = routeCoords.filter((_, index) => index % step === 0);
+  // const step = Math.max(1, Math.floor(routeCoords.length / numWaypoints));
+  // const waypoints = routeCoords.filter((_, index) => index % step === 0);
+
+  const waypoints = routeCoords;
 
   return waypoints;
 }

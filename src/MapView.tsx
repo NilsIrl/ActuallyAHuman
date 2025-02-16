@@ -202,11 +202,11 @@ const MapView: React.FC = () => {
             position={point}
             icon={{
               path: window.google.maps.SymbolPath.CIRCLE,
-              scale: 4,
-              fillColor: "blue",
-              fillOpacity: 0.8,
-              strokeColor: "blue",
-              strokeOpacity: 0.8,
+              scale: 3,
+              fillColor: "green",
+              fillOpacity: 0.3,
+              strokeColor: "green",
+              strokeOpacity: 0.3,
             }}
           />
         ))}
@@ -217,7 +217,7 @@ const MapView: React.FC = () => {
             icon={{
               path: google.maps.SymbolPath.CIRCLE,
               scale: 8,
-              fillColor: "#4285F4",
+              fillColor: "#00FF00",
               fillOpacity: 1,
               strokeColor: "#ffffff",
               strokeWeight: 2,

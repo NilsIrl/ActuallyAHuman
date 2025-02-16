@@ -3,6 +3,7 @@ import MapView from "./MapView";
 import { generate_order_instructions } from "./processing/open_ai_processing";
 import { generateWaypoints } from "./processing/generate-waypoints";
 import { LoadScript } from "@react-google-maps/api";
+import { omnomLogo } from "./assets";
 
 interface OrderItemProps {
   orderNumber: number;
@@ -18,12 +19,12 @@ const OrderItem: React.FC<OrderItemProps> = ({
   return (
     <div
       className={`p-4 border rounded-md flex items-center gap-2 ${
-        active ? "border-blue-400" : "border-gray-300"
+        active ? "border-green-600 bg-green-50/10" : "border-gray-300"
       } ${!active ? "opacity-50" : ""}`}
     >
       {active && (
         <svg
-          className="animate-spin h-5 w-5 text-blue-500"
+          className="animate-spin h-5 w-5 text-green-500"
           xmlns="http://www.w3.org/2000/svg"
           fill="none"
           viewBox="0 0 24 24"
@@ -43,7 +44,7 @@ const OrderItem: React.FC<OrderItemProps> = ({
           />
         </svg>
       )}
-      <span>
+      <span className="text-green-900">
         {orderNumber}. {text}
       </span>
     </div>
@@ -118,12 +119,15 @@ function App() {
   };
 
   return (
-    <div className="max-w-2xl mx-auto bg-white shadow-md rounded-md p-6 mt-10">
+    <div className="max-w-2xl mx-auto shadow-md rounded-md p-6 mt-10 overflow-hidden">
       <LoadScript
         googleMapsApiKey={API_KEY}
-        loadingElement={<div>Loading Maps...</div>}
+        loadingElement={<div className="text-green-900">Loading Maps...</div>}
       >
-        <h1 className="text-3xl font-bold mb-4 text-center">Order on OmNom</h1>
+        <img src={omnomLogo} alt="OmNom" className="w-10 h-10 mx-auto mb-4" />
+        <h1 className="text-3xl font-bold mb-12 text-center text-green-800">
+          Order on OmNom
+        </h1>
         <input
           type="text"
           placeholder="Enter your order"
@@ -134,10 +138,10 @@ function App() {
               handleSubmit(e);
             }
           }}
-          className="w-full border-2 border-gray-300 rounded-md p-2 mb-4"
+          className="w-full border-2 border-green-300 rounded-md p-2 mb-4 focus:border-green-500 focus:outline-none"
         />
         {error && (
-          <div className="text-red-500 mb-4 p-2 bg-red-100 rounded">
+          <div className="text-red-500 mb-4 p-2 bg-red-50 rounded border border-red-200">
             {error}
           </div>
         )}
@@ -145,7 +149,9 @@ function App() {
           orderQueue.length > 1 ? (
             <div className="flex gap-4">
               <div className="flex-1">
-                <h2 className="text-xl font-semibold mb-2">Current Order</h2>
+                <h2 className="text-xl font-semibold mb-2 text-green-900">
+                  Current Order
+                </h2>
                 <OrderItem
                   orderNumber={1}
                   text={orderQueue[0]}
@@ -153,7 +159,9 @@ function App() {
                 />
               </div>
               <div className="flex-1">
-                <h2 className="text-xl font-semibold mb-2">Upcoming Orders</h2>
+                <h2 className="text-xl font-semibold mb-2 text-green-900">
+                  Upcoming Orders
+                </h2>
                 <div className="space-y-2">
                   {orderQueue.slice(1).map((order, index) => (
                     <OrderItem
@@ -167,7 +175,9 @@ function App() {
             </div>
           ) : (
             <div>
-              <h2 className="text-xl font-semibold mb-2">Current Order</h2>
+              <h2 className="text-xl font-semibold mb-2 text-green-700">
+                Current Order
+              </h2>
               <OrderItem
                 orderNumber={1}
                 text={orderQueue[0]}
@@ -176,9 +186,9 @@ function App() {
             </div>
           )
         ) : (
-          <div className="text-center text-gray-500">No orders in queue</div>
+          <div className="text-center text-green-500">No orders in queue</div>
         )}
-        <div className="mt-6 h-[500px] w-full border border-gray-300 rounded-md overflow-hidden">
+        <div className="mt-6 h-[500px] w-full border border-green-300 rounded-md overflow-hidden">
           <MapView />
         </div>
       </LoadScript>
