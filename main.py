@@ -9,8 +9,16 @@ from camera import StereoCamera
 from depth_estimation import DepthEstimator
 from scene_analysis import SceneAnalyzer
 from convex_db import ConvexDatabase
-from semantic_search import SemanticSearch
+# from semantic_search import SemanticSearch
 import json
+import argparse
+
+# --------------------------------------------------
+# Parse Arguments
+# --------------------------------------------------
+parser = argparse.ArgumentParser(description='CV Pipeline with optional GUI')
+parser.add_argument('--gui', action='store_true', help='Enable GUI display')
+args = parser.parse_args()
 
 # --------------------------------------------------
 # Configuration
@@ -41,9 +49,9 @@ with torch.no_grad():
 # --------------------------------------------------
 camera = StereoCamera(left_index=0, width=1920, height=1080)
 depth_estimator = DepthEstimator()
-#scene_analyzer = SceneAnalyzer()
+# scene_analyzer = SceneAnalyzer()  # Uncomment if you need full scene analysis text.
 convex_db = ConvexDatabase()
-semantic_search = SemanticSearch()
+# semantic_search = SemanticSearch()
 
 # --------------------------------------------------
 # Canvas Layout: 2x2 grid with 16:9 cells plus scene analysis box
@@ -81,12 +89,16 @@ while True:
     frame_h, frame_w, _ = left_frame.shape
     frame_area = frame_w * frame_h
 
-    # --- Scene Analysis using GPT-4 Vision mini ---
-    #scene_desc = scene_analyzer.analyze(left_frame)
+    # --- (Optional) Scene Analysis using GPT-4 Vision mini ---
+    # scene_desc = scene_analyzer.analyze(left_frame)
 
     # --- Object Detection using YOLOv8 and CLIP filtering (only one target per frame) ---
-    detection_frame = left_frame.copy()
-    classification_frame = left_frame.copy()
+    if args.gui:
+        detection_frame = left_frame.copy()
+        classification_frame = left_frame.copy()
+    else:
+        detection_frame = left_frame.copy()
+        classification_frame = left_frame.copy()
     best_similarity = 0.0
     best_target_box = None
     combined_detections = []
@@ -107,7 +119,8 @@ while True:
                 "tags": [object_name.lower()]
             }
             combined_detections.append(detection_dict)
-            cv2.rectangle(detection_frame, (x1, y1), (x2, y2), (0,255,0), 2)
+            if args.gui:
+                cv2.rectangle(detection_frame, (x1, y1), (x2, y2), (0,255,0), 2)
             patch = left_frame[y1:y2, x1:x2]
             if patch.size == 0:
                 continue
@@ -121,20 +134,22 @@ while True:
                 patch_embedding /= patch_embedding.norm(dim=-1, keepdim=True)
                 similarity = (patch_embedding @ target_text_embedding.T).item()
             label_text = f"{object_name} {similarity:.2f}"
-            cv2.putText(detection_frame, label_text, (x1, y1-10),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0,255,0), 2)
-            cv2.putText(classification_frame, object_name, (x1, y1-10),
-                        cv2.FONT_HERSHEY_SIMPLEX, 1.0, (255,0,0), 3)
+            if args.gui:
+                cv2.putText(detection_frame, label_text, (x1, y1-10),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0,255,0), 2)
+                cv2.putText(classification_frame, object_name, (x1, y1-10),
+                            cv2.FONT_HERSHEY_SIMPLEX, 1.0, (255,0,0), 3)
             if similarity > SIMILARITY_THRESHOLD and similarity > best_similarity:
                 best_similarity = similarity
                 best_target_box = (x1, y1, x2, y2)
     target_found = best_target_box is not None
     if target_found:
         target_box = best_target_box
-        tx1, ty1, tx2, ty2 = target_box
-        cv2.rectangle(detection_frame, (tx1, ty1), (tx2, ty2), (0,0,255), 3)
-        cv2.putText(detection_frame, f"X: {object_name} {best_similarity:.2f}", (tx1, ty1-10),
-                    cv2.FONT_HERSHEY_SIMPLEX, 1, (0,0,255), 3)
+        if args.gui:
+            tx1, ty1, tx2, ty2 = target_box
+            cv2.rectangle(detection_frame, (tx1, ty1), (tx2, ty2), (0,0,255), 3)
+            cv2.putText(detection_frame, f"X: {object_name} {best_similarity:.2f}", (tx1, ty1-10),
+                        cv2.FONT_HERSHEY_SIMPLEX, 1, (0,0,255), 3)
 
     # --- Depth Estimation using DPT ---
     depth_map_vis, depth_map = depth_estimator.estimate_depth(left_frame)
@@ -152,57 +167,76 @@ while True:
         avg_depth = roi.mean()
         depth_label = "Close" if avg_depth < CLOSE_THRESHOLD else "Mid" if avg_depth < MID_THRESHOLD else "Far"
         label = f"{det['class']}: {depth_label}"
-        cv2.rectangle(classification_frame, (x1, y1), (x2, y2), (255,0,0), 3)
-        cv2.putText(classification_frame, label, (x1, y2-10),
-                    cv2.FONT_HERSHEY_SIMPLEX, 1.2, (255,0,0), 3)
+        if args.gui:
+            cv2.rectangle(classification_frame, (x1, y1), (x2, y2), (255,0,0), 3)
+            cv2.putText(classification_frame, label, (x1, y2-10),
+                        cv2.FONT_HERSHEY_SIMPLEX, 1.2, (255,0,0), 3)
 
     # --- Movement Command Decision ---
     if target_found and target_box is not None:
         tx1, ty1, tx2, ty2 = target_box
         roi_target = norm_depth_map[ty1:ty2, tx1:tx2]
         avg_depth_target = roi_target.mean() if roi_target.size > 0 else 1.0
-        movement_cmd = "STOP" if avg_depth_target < CLOSE_THRESHOLD else "Straight"
+        # If the target is close, adjust turning to center the target.
+        if avg_depth_target < CLOSE_THRESHOLD:
+            target_center = (tx1 + tx2) / 2.0
+            frame_center = frame_w / 2.0
+            horizontal_error = target_center - frame_center
+            error_threshold = 50  # pixels
+            if abs(horizontal_error) < error_threshold:
+                movement_cmd = "STOP"
+            elif horizontal_error > 0:
+                movement_cmd = "Turn Right"
+            else:
+                movement_cmd = "Turn Left"
+        else:
+            movement_cmd = "Straight"
     else:
         movement_cmd = "Turn Right 10°"
 
+    print(movement_cmd)
+
     # --- Build Scene Analysis Box ---
-    scene_box = np.ones((SCENE_BOX_H, LEFT_CANVAS_W, 3), dtype=np.uint8) * 255
-    scene_lines = [
-        #f"Scene: {scene_desc[:120]}...",
-        f"Target Seen: {'Yes' if target_found else 'No'}",
-        f"Command: {movement_cmd}",
-        f"Prompt: {TARGET_PROMPT}"
-    ]
-    y_pos = 40
-    for line in scene_lines:
-        cv2.putText(scene_box, line, (20, y_pos),
-                    cv2.FONT_HERSHEY_SIMPLEX, 1, (0,0,255), 2)
-        y_pos += 50
+    if args.gui:
+        scene_box = np.ones((SCENE_BOX_H, LEFT_CANVAS_W, 3), dtype=np.uint8) * 255
+        scene_lines = [
+            # Optionally include scene description:
+            # f"Scene: {scene_desc[:120]}...",
+            f"Target Seen: {'Yes' if target_found else 'No'}",
+            f"Command: {movement_cmd}",
+            f"Prompt: {TARGET_PROMPT}"
+        ]
+        y_pos = 40
+        for line in scene_lines:
+            cv2.putText(scene_box, line, (20, y_pos),
+                        cv2.FONT_HERSHEY_SIMPLEX, 1, (0,0,255), 2)
+            y_pos += 50
 
-    # --- Assemble 2x2 Grid ---
-    grid_img = np.ones((GRID_ROWS * CELL_H, LEFT_CANVAS_W, 3), dtype=np.uint8) * 255
-    raw_resized = cv2.resize(raw_frame, (CELL_W, CELL_H))
-    det_resized = cv2.resize(detection_frame, (CELL_W, CELL_H))
-    depth_resized = cv2.resize(depth_map_vis, (CELL_W, CELL_H))
-    class_resized = cv2.resize(classification_frame, (CELL_W, CELL_H))
-    grid_img[0:CELL_H, 0:CELL_W] = raw_resized
-    grid_img[0:CELL_H, CELL_W:LEFT_CANVAS_W] = det_resized
-    grid_img[CELL_H:2*CELL_H, 0:CELL_W] = depth_resized
-    grid_img[CELL_H:2*CELL_H, CELL_W:LEFT_CANVAS_W] = class_resized
+        # --- Assemble 2x2 Grid ---
+        grid_img = np.ones((GRID_ROWS * CELL_H, LEFT_CANVAS_W, 3), dtype=np.uint8) * 255
+        raw_resized = cv2.resize(raw_frame, (CELL_W, CELL_H))
+        det_resized = cv2.resize(detection_frame, (CELL_W, CELL_H))
+        depth_resized = cv2.resize(depth_map_vis, (CELL_W, CELL_H))
+        class_resized = cv2.resize(classification_frame, (CELL_W, CELL_H))
+        grid_img[0:CELL_H, 0:CELL_W] = raw_resized
+        grid_img[0:CELL_H, CELL_W:LEFT_CANVAS_W] = det_resized
+        grid_img[CELL_H:2*CELL_H, 0:CELL_W] = depth_resized
+        grid_img[CELL_H:2*CELL_H, CELL_W:LEFT_CANVAS_W] = class_resized
 
-    left_canvas = np.ones((LEFT_CANVAS_H, LEFT_CANVAS_W, 3), dtype=np.uint8) * 255
-    left_canvas[0:GRID_ROWS * CELL_H, :] = grid_img
-    left_canvas[GRID_ROWS * CELL_H:LEFT_CANVAS_H, :] = scene_box
+        left_canvas = np.ones((LEFT_CANVAS_H, LEFT_CANVAS_W, 3), dtype=np.uint8) * 255
+        left_canvas[0:GRID_ROWS * CELL_H, :] = grid_img
+        left_canvas[GRID_ROWS * CELL_H:LEFT_CANVAS_H, :] = scene_box
 
-    # --- Scale final output 25% bigger ---
-    final_canvas = cv2.resize(left_canvas, (FINAL_CANVAS_W, FINAL_CANVAS_H))
+        # --- Scale final output 25% bigger ---
+        final_canvas = cv2.resize(left_canvas, (FINAL_CANVAS_W, FINAL_CANVAS_H))
+
+        cv2.imshow("CV Pipeline", final_canvas)
+        if cv2.waitKey(1) == 27:
+            break
 
     #convex_db.insert_frame_data(time.time(), combined_detections, scene_desc, movement_cmd, mapping_info={})
 
-    cv2.imshow("CV Pipeline", final_canvas)
-    if cv2.waitKey(1) == 27:
-        break
-
 camera.release()
-cv2.destroyAllWindows()
+if args.gui:
+    cv2.destroyAllWindows()
 convex_db.close()
