@@ -110,22 +110,23 @@ def run_order():
     conversation_id = uuid.uuid4()
     try:
         screenshot = take_screenshot()
-        if screenshot:
-            response, conversation_id = pass_screenshot_to_gpt(screenshot, conversation_id)
-            if response:
-                logging.info(f"[main]: Received response - {response}")
-                # attempt to parse as json
-                try:    
-                    response = json.loads(response)
-                    print(response)
-                except json.JSONDecodeError:
-                    logging.error(f"[main]: Error parsing response as JSON - {response}")
-                    
-                if response["action"] == "complete":
-                    logging.info("[main]: Order complete")
-                    return True
-                action = response["action"]
-                perform_action(action)
+        assert screenshot
+
+        response, conversation_id = pass_screenshot_to_gpt(screenshot, conversation_id)
+        if response:
+            logging.info(f"[main]: Received response - {response}")
+            # attempt to parse as json
+            try:    
+                response = json.loads(response)
+                print(response)
+            except json.JSONDecodeError:
+                logging.error(f"[main]: Error parsing response as JSON - {response}")
+                
+            if response["action"] == "complete":
+                logging.info("[main]: Order complete")
+                return True
+            action = response["action"]
+            perform_action(action)
                 
     except Exception as e:
         logging.error(f"[main]: Error in main loop - {e}")
