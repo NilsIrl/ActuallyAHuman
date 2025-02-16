@@ -1,3 +1,4 @@
+"""
 brew install python3 cmake pkg-config
 brew install opencv
 python3 -m venv yolov8_env
@@ -12,7 +13,7 @@ pip install -r requirements.txt Silicon compatibility issue
 pip install opencv-contrib-python
 
 
-winget install Python  # Install Python if not installed
+winget install Python
 winget install Kitware.CMake
 pip install opencv-python opencv-contrib-python
 python -m venv yolov8_env
@@ -20,11 +21,12 @@ yolov8_env\Scripts\activate
 pip install ultralytics torch torchvision torchaudio
 pip install numpy opencv-python scipy filterpy scikit-learn
 pip install opencv-contrib-python
-pip install numba --no-cache-dir  # Fix compatibility issues
+pip install numba --no-cache-dir
 git clone https://github.com/nwojke/deep_sort.git
 cd deep_sort
 pip install -r requirements.txt
 python -c "import torch, cv2, ultralytics; print('Setup successful')"
+"""
 
 from ultralytics import YOLO
 import cv2
