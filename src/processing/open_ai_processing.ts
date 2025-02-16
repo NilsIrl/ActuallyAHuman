@@ -2,6 +2,11 @@ import OpenAI from "openai";
 import { zodResponseFormat } from "openai/helpers/zod.mjs";
 import { z } from "zod";
 
+// These imports assume you have langchainjs installed
+import { initializeAgentExecutorWithOptions } from "langchain/agents";
+import { ChatOpenAI } from "@langchain/openai";
+import { DynamicTool } from "langchain/tools";
+
 const openai = new OpenAI({
   organization: import.meta.env.VITE_OPENAI_ORGANIZATION,
   apiKey: import.meta.env.VITE_OPENAI_API_KEY,
@@ -25,23 +30,37 @@ const processedInstructionsSchema = z.object({
   ),
 });
 
+// Configure logging
+const logPrefix = "[OpenAI Processing]";
+const log = {
+  info: (msg: string, ...args: any[]) =>
+    console.log(`${logPrefix} INFO: ${msg}`, ...args),
+  error: (msg: string, ...args: any[]) =>
+    console.error(`${logPrefix} ERROR: ${msg}`, ...args),
+  warn: (msg: string, ...args: any[]) =>
+    console.warn(`${logPrefix} WARN: ${msg}`, ...args),
+  debug: (msg: string, ...args: any[]) =>
+    console.debug(`${logPrefix} DEBUG: ${msg}`, ...args),
+};
+
 // Updated getLocation to return a Promise
 function getLocation(): Promise<GeolocationPosition> {
+  log.info("Getting user location");
   return new Promise((resolve, reject) => {
     if (!navigator.geolocation) {
+      log.error("Geolocation not supported");
       reject(new Error("Geolocation is not supported by your browser."));
     } else {
       navigator.geolocation.getCurrentPosition(
         (position) => {
-          console.log(
-            "Located position:",
-            position.coords.latitude,
-            position.coords.longitude
-          );
+          log.info("Location obtained", {
+            lat: position.coords.latitude,
+            lng: position.coords.longitude,
+          });
           resolve(position);
         },
         (error) => {
-          console.error("Error retrieving location:", error);
+          log.error("Failed to get location", error);
           reject(error);
         }
       );
@@ -49,92 +68,106 @@ function getLocation(): Promise<GeolocationPosition> {
   });
 }
 
-// Function to get current location
-// const getCurrentLocation = (): Promise<GeolocationPosition> => {
-//   return new Promise((resolve, reject) => {
-//     if (!navigator.geolocation) {
-//       reject(new Error("Geolocation is not supported by your browser"));
-//     } else {
-//       const options = {
-//         enableHighAccuracy: true,
-//         timeout: 10000, // Increased timeout
-//         maximumAge: 0,
-//       };
+/**
+ * Helper function to query the Google Maps API for a destination.
+ *
+ * Note: Replace the URL and parameters with your preferred endpoint (e.g., Places API).
+ * Also ensure your Google Maps API key is set (consider using an environment variable).
+ */
+async function getDestinationFromGoogleMaps(
+  query: string
+): Promise<{ lat: number; lng: number }> {
+  log.info("Querying Google Maps API", { query });
+  try {
+    const apiKey = import.meta.env.VITE_GOOGLE_MAPS_API_KEY;
+    const url = `https://maps.googleapis.com/maps/api/place/textsearch/json?query=${encodeURIComponent(
+      query
+    )}&key=${apiKey}`;
 
-//       // First check the permission status
-//       const checkPermission = async () => {
-//         try {
-//           // Check if the Permissions API is supported
-//           if (navigator.permissions && navigator.permissions.query) {
-//             const result = await navigator.permissions.query({
-//               name: "geolocation",
-//             });
-//             console.log("Geolocation permission status:", result.state);
+    const response = await fetch(url);
+    const data = await response.json();
 
-//             if (result.state === "denied") {
-//               reject(
-//                 new Error(
-//                   "Location permission was denied. Please enable location access in your browser settings."
-//                 )
-//               );
-//               return;
-//             }
-//           }
+    if (!data.results || data.results.length === 0) {
+      log.error("No results found from Google Maps", { query });
+      throw new Error("No destination found using Google Maps.");
+    }
 
-//           // Proceed with getting location
-//           navigator.geolocation.getCurrentPosition(
-//             (position) => {
-//               console.log("Got position:", position.coords);
-//               resolve(position);
-//             },
-//             (err) => {
-//               console.warn(`ERROR(${err.code}): ${err.message}`);
-//               switch (err.code) {
-//                 case err.PERMISSION_DENIED:
-//                   reject(
-//                     new Error(
-//                       "Please allow location access to use this feature"
-//                     )
-//                   );
-//                   break;
-//                 case err.POSITION_UNAVAILABLE:
-//                   reject(
-//                     new Error(
-//                       "Location information is unavailable. Please check your device's location settings."
-//                     )
-//                   );
-//                   break;
-//                 case err.TIMEOUT:
-//                   reject(
-//                     new Error("Location request timed out. Please try again.")
-//                   );
-//                   break;
-//                 default:
-//                   reject(err);
-//               }
-//             },
-//             options
-//           );
-//         } catch (error) {
-//           reject(
-//             new Error(
-//               "Error accessing location services. Please check your browser settings."
-//             )
-//           );
-//         }
-//       };
+    // We simply choose the first result here.
+    const location = data.results[0].geometry.location;
+    log.info("Destination found", location);
+    return location; // format: { lat: number, lng: number }
+  } catch (error) {
+    log.error("Google Maps API error", { error, query });
+    throw error;
+  }
+}
 
-//       checkPermission();
-//     }
-//   });
-// };
+/**
+ * Define a DynamicTool for the agent that uses Google Maps.
+ */
+const googleMapsTool = new DynamicTool({
+  name: "GoogleMapsAPI",
+  description:
+    "Query Google Maps to determine a suitable destination given a text query.",
+  func: async (input: string) => {
+    try {
+      const location = await getDestinationFromGoogleMaps(input);
+      // Return a formatted string the agent can interpret.
+      return `Destination found: latitude ${location.lat}, longitude ${location.lng}`;
+    } catch (error: any) {
+      return `Error querying Google Maps: ${error.message}`;
+    }
+  },
+});
+
+/**
+ * A new function that uses a LangChain agent to generate order instructions.
+ * The agent uses the GoogleMaps tool to autonomously decide on the end point.
+ */
+async function generateOrderInstructionsWithAgent(order: string) {
+  log.info("Generating order instructions with agent", { order });
+  try {
+    const llm = new ChatOpenAI({
+      modelName: "gpt-4o-mini",
+      openAIApiKey: import.meta.env.VITE_OPENAI_API_KEY,
+    });
+    const tools = [googleMapsTool];
+
+    log.debug("Initializing agent executor");
+    const executor = await initializeAgentExecutorWithOptions(tools, llm, {
+      agentType: "chat-conversational-react-description",
+      verbose: true,
+    });
+
+    const position = await getLocation();
+    const { latitude, longitude } = position.coords;
+
+    const prompt = `
+      I have a delivery order with the following details: ${order}.
+      The current location is latitude: ${latitude}, longitude: ${longitude}.
+      Please decide on a suitable destination for this order.
+    `;
+
+    log.debug("Running agent executor", { prompt });
+    const result = await executor.run(prompt);
+    log.info("Agent execution completed", { result });
+    return result;
+  } catch (error) {
+    log.error("Agent execution failed", { error, order });
+    throw error;
+  }
+}
 
 async function generate_order_instructions(order: string) {
+  log.info("Generating order instructions", { order });
   try {
-    // Use await here since getLocation now returns a Promise
     const position = await getLocation();
-    console.log("OpenAI Position:", position);
     const { latitude, longitude } = position.coords;
+
+    log.debug("Making OpenAI API call", {
+      model: "gpt-4o-mini",
+      location: { latitude, longitude },
+    });
 
     const response = await openai.beta.chat.completions.parse({
       model: "gpt-4o-mini",
@@ -154,12 +187,19 @@ async function generate_order_instructions(order: string) {
         "processed_instructions"
       ),
     });
+
+    log.info("Successfully generated instructions");
+    log.debug("API response", response.choices[0].message.parsed);
     return response.choices[0].message.parsed;
   } catch (error) {
-    console.error("Error generating order instructions:", error);
+    log.error("Failed to generate instructions", { error, order });
     throw error;
   }
 }
 
-// Export the updated getLocation so it can be used in other components
-export { generate_order_instructions, getLocation };
+// Export both implementations so you can choose which one to use.
+export {
+  generate_order_instructions,
+  generateOrderInstructionsWithAgent,
+  getLocation,
+};

@@ -234,16 +234,6 @@ const MapView: React.FC = () => {
         </div>
       )}
 
-      <div className="absolute top-4 left-4 bg-white p-4 rounded shadow">
-        {gpsData.map((point, index) => (
-          <div key={index}>
-            <p>Point {index + 1}</p>
-            <p>Latitude: {point.lat}</p>
-            <p>Longitude: {point.lng}</p>
-          </div>
-        ))}
-      </div>
-
       {/* <div className="absolute top-4 left-4 bg-white p-4 rounded shadow">
         {!currentLocation && !locationError && (
           <button

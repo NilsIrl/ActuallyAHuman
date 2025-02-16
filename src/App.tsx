@@ -1,6 +1,9 @@
 import { useEffect, useState, useRef } from "react";
 import MapView from "./MapView";
-import { generate_order_instructions } from "./processing/open_ai_processing";
+import {
+  generate_order_instructions,
+  generateOrderInstructionsWithAgent,
+} from "./processing/open_ai_processing";
 import { generateWaypoints } from "./processing/generate-waypoints";
 import { LoadScript } from "@react-google-maps/api";
 import { omnomLogo } from "./assets";
@@ -56,6 +59,8 @@ const API_KEY = import.meta.env.VITE_GOOGLE_MAPS_API_KEY!;
 function App() {
   const [orderQueue, setOrderQueue] = useState<string[]>([]);
 
+  const agentMode = true;
+
   const [text, setText] = useState("");
 
   const [error, setError] = useState<string | null>(null);
@@ -78,34 +83,66 @@ function App() {
             order: text,
           }),
         });
-        const orderData = await orderResponse.json();
-        console.log(orderData);
 
-        const instructions = await generate_order_instructions(text);
-        console.log(instructions);
+        if (agentMode) {
+          const instructions = await generateOrderInstructionsWithAgent(text);
+          console.log(instructions);
 
-        if (instructions) {
-          const waypoints = await generateWaypoints(
-            instructions.start,
-            instructions.end
-          );
-          console.log(waypoints);
+          const instructionsObject = JSON.parse(instructions);
 
-          const waypointsResponse = await fetch(
-            "http://localhost:8000/send_waypoints",
-            {
-              method: "POST",
-              headers: {
-                Accept: "application/json",
-                "Content-Type": "application/json",
-              },
-              body: JSON.stringify({
-                waypoints: waypoints,
-              }),
-            }
-          );
-          const waypointsData = await waypointsResponse.json();
-          console.log(waypointsData);
+          if (instructionsObject) {
+            const waypoints = await generateWaypoints(
+              instructionsObject.start,
+              instructionsObject.end
+            );
+            console.log(waypoints);
+
+            const waypointsResponse = await fetch(
+              "http://localhost:8000/send_waypoints",
+              {
+                method: "POST",
+                headers: {
+                  Accept: "application/json",
+                  "Content-Type": "application/json",
+                },
+                body: JSON.stringify({
+                  waypoints: waypoints,
+                }),
+              }
+            );
+            const waypointsData = await waypointsResponse.json();
+            console.log(waypointsData);
+          }
+        } else {
+          const orderData = await orderResponse.json();
+          console.log(orderData);
+
+          const instructions = await generate_order_instructions(text);
+          console.log(instructions);
+
+          if (instructions) {
+            const waypoints = await generateWaypoints(
+              instructions.start,
+              instructions.end
+            );
+            console.log(waypoints);
+
+            const waypointsResponse = await fetch(
+              "http://localhost:8000/send_waypoints",
+              {
+                method: "POST",
+                headers: {
+                  Accept: "application/json",
+                  "Content-Type": "application/json",
+                },
+                body: JSON.stringify({
+                  waypoints: waypoints,
+                }),
+              }
+            );
+            const waypointsData = await waypointsResponse.json();
+            console.log(waypointsData);
+          }
         }
       } catch (error) {
         console.error("Error:", error);
@@ -124,7 +161,11 @@ function App() {
         googleMapsApiKey={API_KEY}
         loadingElement={<div className="text-green-900">Loading Maps...</div>}
       >
-        <img src={omnomLogo} alt="OmNom" className="w-10 h-10 mx-auto mb-4" />
+        <img
+          src={omnomLogo}
+          alt="OmNom"
+          className="w-10 h-10 mx-auto mb-4"
+        />
         <h1 className="text-3xl font-bold mb-12 text-center text-green-800">
           Order on OmNom
         </h1>
