@@ -4,7 +4,7 @@
 Servo pan;
 Servo extend;
 
-#define PAN_PIN 2
+#define PAN_PIN 5
 #define EXTEND_PIN 3
 
 int servoByte = 0;

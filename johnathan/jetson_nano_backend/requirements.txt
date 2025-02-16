@@ -4,3 +4,4 @@ pygnssutils
 pyserial
 websockets
 openai
+matplotlib
