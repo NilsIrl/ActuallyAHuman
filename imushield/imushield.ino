@@ -37,4 +37,5 @@ void loop()
   prevHeading = heading;
 
   Serial.println(continuousHeading);
+  delay(30);
 }
