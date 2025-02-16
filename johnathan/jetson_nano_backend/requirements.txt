@@ -3,3 +3,4 @@ uvicorn
 pygnssutils
 pyserial
 websockets
+openai

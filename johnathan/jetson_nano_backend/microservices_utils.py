@@ -1,6 +1,7 @@
 import sqlite3
 import time
-
+import serial
+from roboclaw import Roboclaw
 def get_latest_imu_data(conn_obj = None):
     """
     Retrieves the most recent IMU reading from the database.
@@ -26,7 +27,7 @@ def get_latest_imu_data(conn_obj = None):
         result = cursor.fetchone()
         if conn_obj is None:
             conn.close()
-        
+
         if result is None:
             raise ValueError("No IMU data found in database")
             
@@ -149,3 +150,107 @@ def move_robot_forward_time(rc, distance_meters: float, address: int = 0x80) -> 
         # Ensure motors are stopped regardless of any outcome
         rc.SpeedM1M2(address, 0, 0)
 
+def connect_to_arduino():
+    """
+    Establishes a serial connection to the Arduino.
+    
+    Returns:
+        serial.Serial: Serial connection object to the Arduino
+        
+    Raises:
+        SerialException: If connection to Arduino fails
+    """
+    ARDUINO_PORT = '/dev/serial/by-id/usb-Arduino__www.arduino.cc__0043_1423831383435181F1B0-if00'  # Standard Arduino USB port on Linux
+    BAUD_RATE = 9600
+    
+    return serial.Serial(ARDUINO_PORT, BAUD_RATE, timeout=1)
+
+def _control_servo(arduino_serial, servo_type: int, angle: int) -> None:
+    """
+    Controls the servo motors connected to the Arduino.
+    
+    Args:
+        arduino_serial: Serial connection to Arduino
+        servo_type: 1 for pan servo, 2 for extend servo
+        angle: Servo angle (0-180 degrees)
+        
+    Raises:
+        ValueError: If invalid servo_type or angle provided
+        SerialException: If communication with Arduino fails
+    """
+    if servo_type not in [1, 2]:
+        raise ValueError("servo_type must be 1 (pan) or 2 (extend)")
+    if not 0 <= angle <= 180:
+        raise ValueError("angle must be between 0 and 180 degrees")
+    
+    try:
+        # Send servo selector (1 or 2)
+        arduino_serial.write(bytes([servo_type]))
+        # Send angle value
+        arduino_serial.write(bytes([angle]))
+    except serial.SerialException as e:
+        raise serial.SerialException(f"Failed to communicate with Arduino: {e}")
+
+def pan_servo(arduino_serial, angle: int) -> None:
+    """
+    Controls the pan servo motor.
+    Angle 0 maps to center position (90 degrees).
+    Other angles are scaled by 1.5 and offset from center.
+    
+    Args:
+        arduino_serial: Serial connection to Arduino
+        angle: Pan angle, where 0 is center position
+    """
+    _control_servo(arduino_serial, 1, int((angle / 1.5) + 90))
+
+def extend(arduino_serial) -> None:
+    """
+    Extends the servo motor to the "out" position (60 degrees).
+    
+    Args:
+        arduino_serial: Serial connection to Arduino
+    """
+    _control_servo(arduino_serial, 2, 60)
+
+def retract(arduino_serial) -> None:
+    """
+    Retracts the servo motor to the "in" position (100 degrees).
+    
+    Args:
+        arduino_serial: Serial connection to Arduino
+    """
+    _control_servo(arduino_serial, 2, 100)
+
+
+def initialize_arm() -> None:
+    """
+    Initializes the arm's roboclaw controller with the necessary settings.
+    
+    Args:
+        rc: Roboclaw instance
+        address: Roboclaw address (default: 0x80)
+    """
+    rc = Roboclaw("/dev/serial/by-path/platform-3610000.usb-usb-0:2.2:1.0", 115200)
+    address = 0x80
+    # Reset encoders to 0 (assuming arm is at bottom position)
+    rc.ResetEncoders(address)
+    
+    # Configure PID settings
+    rc.SetM2VelocityPID(address, 0, 0, 0, 2500)
+    rc.SetM2PositionPID(address, 200, 0, 4000, 100, 10, 0, 10500)
+
+    # Ensure motor is stopped
+    rc.ForwardM2(address, 0)
+
+def set_arm_position(rc, position: int) -> None:
+    """
+    Sets the arm to a specific position using encoder counts.
+    
+    Args:
+        rc: Roboclaw instance
+        position: Desired position in encoder counts (0-10500)
+
+    Raises:
+        ValueError: If position is outside valid range
+    """
+    rc.SetM2Position(0x80, position, 1)
