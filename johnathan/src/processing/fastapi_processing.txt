@@ -1,0 +1,46 @@
+import { searchLocation } from "../api/backend";
+
+// Configure logging
+const logPrefix = "[FastAPI Processing]";
+const log = {
+  info: (msg: string, ...args: any[]) =>
+    console.log(`${logPrefix} INFO: ${msg}`, ...args),
+  error: (msg: string, ...args: any[]) =>
+    console.error(`${logPrefix} ERROR: ${msg}`, ...args),
+  debug: (msg: string, ...args: any[]) =>
+    console.debug(`${logPrefix} DEBUG: ${msg}`, ...args),
+};
+
+async function generate_order_instructions(order: string) {
+  log.info("Generating order instructions via FastAPI", { order });
+  try {
+    const result = await processOrder(
+      order
+    );
+
+    log.info("Successfully generated instructions");
+    log.debug("API response", result);
+    return result;
+  } catch (error) {
+    log.error("Failed to generate instructions", { error, order });
+    throw error;
+  }
+}
+
+async function generateOrderInstructionsWithAgent(order: string) {
+  log.info("Generating order instructions with agent via FastAPI", { order });
+  try {
+    const result = await processOrder(
+      order
+    );
+
+    log.info("Agent execution completed");
+    log.debug("API response", result);
+    return result;
+  } catch (error) {
+    log.error("Agent execution failed", { error, order });
+    throw error;
+  }
+}
+
+export { generate_order_instructions, generateOrderInstructionsWithAgent };
