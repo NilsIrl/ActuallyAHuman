@@ -6,6 +6,7 @@ import MapView from "./MapView";
 // } from "./processing/open_ai_processing";
 import {
   generate_order_instructions,
+  generate_order_instructions2,
   generateOrderInstructionsWithAgent,
 } from "./processing/open_ai_processing";
 import { generateWaypoints } from "./processing/generate-waypoints";
@@ -65,6 +66,8 @@ function App() {
 
   const agentMode = false;
 
+  const ROBOT_ADDRESS = import.meta.env.VITE_ROBOT_ADDRESS!;
+
   const [text, setText] = useState("");
 
   const [error, setError] = useState<string | null>(null);
@@ -79,16 +82,19 @@ function App() {
       try {
         console.log("agentMode:" + agentMode);
 
-        const orderResponse = await fetch("http://localhost:8000/add_order", {
-          method: "POST",
-          headers: {
-            Accept: "application/json",
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({
-            order: text,
-          }),
-        });
+        const orderResponse = await fetch(
+          `http://${ROBOT_ADDRESS}/add_order`,
+          {
+            method: "POST",
+            headers: {
+              Accept: "application/json",
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify({
+              order: text,
+            }),
+          }
+        );
 
         if (agentMode) {
           const instructions = await generateOrderInstructionsWithAgent(text);
@@ -104,7 +110,7 @@ function App() {
             console.log(waypoints);
 
             const waypointsResponse = await fetch(
-              "http://localhost:8000/send_waypoints",
+              `http://${ROBOT_ADDRESS}/send_waypoints`,
               {
                 method: "POST",
                 headers: {
@@ -123,7 +129,7 @@ function App() {
           const orderData = await orderResponse.json();
           console.log(orderData);
 
-          const instructions = await generate_order_instructions(text);
+          const instructions = await generate_order_instructions2(text);
           console.log(instructions);
 
           if (instructions) {
@@ -134,7 +140,7 @@ function App() {
             console.log(waypoints);
 
             const waypointsResponse = await fetch(
-              "http://localhost:8000/send_waypoints",
+              `http://${ROBOT_ADDRESS}/send_waypoints`,
               {
                 method: "POST",
                 headers: {

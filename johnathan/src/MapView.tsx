@@ -21,6 +21,8 @@ interface LatLng {
 const API_KEY = import.meta.env.VITE_GOOGLE_MAPS_API_KEY!;
 
 const MapView: React.FC = () => {
+  const ROBOT_ADDRESS = import.meta.env.VITE_ROBOT_ADDRESS!;
+
   const [origin, setOrigin] = useState<LatLng | null>(null);
   const [destination, setDestination] = useState<LatLng | null>(null);
   const [directions, setDirections] =
@@ -65,7 +67,7 @@ const MapView: React.FC = () => {
       }
 
       console.log("Attempting to connect to WebSocket...");
-      wsRef.current = new WebSocket("ws://localhost:8000/ws");
+      wsRef.current = new WebSocket(`ws://${ROBOT_ADDRESS}/ws`);
 
       wsRef.current.onopen = () => {
         console.log("WebSocket connection established");
@@ -86,7 +88,7 @@ const MapView: React.FC = () => {
             ];
             return newData.slice(-50);
           });
-          
+
           setCurrentLocation({ lat: data.latitude, lng: data.longitude });
         } else {
           console.log("Invalid point:", data);
