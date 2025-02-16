@@ -1,2 +1,5 @@
 fastapi
 uvicorn
+pygnssutils
+pyserial
+websockets

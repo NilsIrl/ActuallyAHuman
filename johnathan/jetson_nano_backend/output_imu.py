@@ -25,24 +25,6 @@ def init_database():
     
     conn.close()
 
-def process_line(line, cursor):
-    """
-    Process each line of output from the IMU serial connection
-    Args:
-        line (str): A line of output from the IMU
-        cursor: SQLite cursor for database operations
-    """
-    try:
-        # Convert the line to a float
-        imu_value = float(line.strip())
-        
-        # Insert the value into the database
-        cursor.execute('INSERT INTO imu_data (value) VALUES (?)', (imu_value,))
-        
-        # Print for debugging
-        print(f"Recorded IMU value: {imu_value}")
-    except ValueError as e:
-        print(f"Invalid data received: {line.strip()}")
 
 def main():
     # Initialize the database
@@ -69,7 +51,18 @@ def main():
         while True:
             if ser.in_waiting:
                 line = ser.readline().decode('utf-8')
-                process_line(line, cursor)
+                try:
+                    # Convert the line to a float
+                    imu_value = float(line.strip())
+                    
+                    # Insert the value into the database
+                    cursor.execute('INSERT INTO imu_data (value) VALUES (?)', (imu_value,))
+                    conn.commit()
+                    
+                    # Print for debugging
+                    print(f"Recorded IMU value: {imu_value}")
+                except ValueError as e:
+                    print(f"Invalid data received: {line.strip()}")
                 
     except KeyboardInterrupt:
         print("\nStopping IMU data collection...")

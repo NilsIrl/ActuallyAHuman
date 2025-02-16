@@ -1,7 +1,7 @@
 import sqlite3
 import time
 
-def get_latest_imu_data():
+def get_latest_imu_data(conn_obj = None):
     """
     Retrieves the most recent IMU reading from the database.
     Returns:
@@ -12,7 +12,10 @@ def get_latest_imu_data():
         Exception: If any other error occurs
     """
     try:
-        conn = sqlite3.connect('/home/jetson/gps_data.db')
+        if conn_obj is None:
+            conn = sqlite3.connect('/home/jetson/gps_data.db')
+        else:
+            conn = conn_obj
         cursor = conn.cursor()
         cursor.execute('''
             SELECT value
@@ -21,7 +24,8 @@ def get_latest_imu_data():
             LIMIT 1
         ''')
         result = cursor.fetchone()
-        conn.close()
+        if conn_obj is None:
+            conn.close()
         
         if result is None:
             raise ValueError("No IMU data found in database")
@@ -66,27 +70,29 @@ def rotate_robot(rc, rotation_degrees: float, address: int = 0x80) -> bool:
         Same exceptions as get_latest_imu_data()
     """
     # Get starting heading and calculate target
-    current_heading = get_latest_imu_data()
+    conn = sqlite3.connect('/home/jetson/gps_data.db')
+    current_heading = get_latest_imu_data(conn)
     desired_heading = current_heading + rotation_degrees
     
     # Use monotonic time for reliable timing with fixed 5 second timeout
     start_time = time.monotonic()
     
-    TOLERANCE = 2.5  # Hardcoded tolerance value in degrees
+    TOLERANCE = 5  # Hardcoded tolerance value in degrees
     
     while time.monotonic() - start_time < 5.0:
         # Get current heading and calculate error
-        current_heading = get_latest_imu_data()
+        current_heading = get_latest_imu_data(conn)
         angle_difference = desired_heading - current_heading
-        
+        print(f"desired_heading: {desired_heading}, current_heading: {current_heading}")
+        print(f"angle_difference: {angle_difference}")
         # Check if we've reached the target within tolerance
-        if abs(angle_difference) < TOLERANCE:
-            # Stop motors and return success
-            rc.ForwardBackwardM1(address, 64)
-            rc.ForwardBackwardM2(address, 64)
-            return True
+        # if abs(angle_difference) < TOLERANCE:
+        #     # Stop motors and return success
+        #     rc.ForwardBackwardM1(address, 64)
+        #     rc.ForwardBackwardM2(address, 64)
+        #     return True
             
-        P_GAIN = 3.0
+        P_GAIN = 0.7
         # Calculate motor powers using fixed P control (p_gain = 3.0)
         turnpower = angle_difference * P_GAIN
         turnpower_m2 = -turnpower
@@ -106,7 +112,7 @@ def rotate_robot(rc, rotation_degrees: float, address: int = 0x80) -> bool:
     # If we get here, we timed out - stop motors
     rc.ForwardBackwardM1(address, 64)
     rc.ForwardBackwardM2(address, 64)
-    return False
+    return True
 
 def move_robot_forward_time(rc, distance_meters: float, address: int = 0x80) -> bool:
     """
