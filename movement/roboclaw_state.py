@@ -124,7 +124,7 @@ rc.SpeedM2(address, 2500)
 
 # rc.SpeedM1M2(address, 127, 127)
 
-time.sleep(1)
+time.sleep(10)
 
 rc.ForwardM1(address, 0)
 rc.ForwardM2(address, 0)
