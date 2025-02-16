@@ -5,8 +5,19 @@ from pydantic import BaseModel
 from typing import List
 import uvicorn
 import asyncio
-from microservices_utils import get_latest_gps_coordinates, get_latest_imu_data
+from microservices_utils import get_latest_gps_coordinates, get_latest_imu_data, move_robot_forward_time, rotate_robot
 import random  # Simulating GPS data (replace with real data)
+import math
+from roboclaw import Roboclaw
+
+rc = Roboclaw("/dev/serial/by-path/platform-3610000.usb-usb-0:2.4:1.0", 115200)
+rc.Open()
+address = 0x80
+version = rc.ReadVersion(address)
+if not version[0]:
+    print("GETVERSION Failed")
+else:
+    print(repr(version[1]))
 
 class Order(BaseModel):
     order: str
@@ -86,8 +97,49 @@ async def add_order(order: Order):
 async def process_waypoints(waypoints: List[tuple[float, float]]):
     # Your long-running code here
     print("Starting waypoint processing...")
-    initial_position = get_latest_gps_coordinates()
-    print(f"Initial position: {initial_position}")
+    for waypoint in waypoints:
+        latitude, longitude = get_latest_gps_coordinates()
+        # Calculate heading from current position to waypoint
+        lat2, lon2 = waypoint  # Target waypoint
+        
+        lat1_rad = math.radians(latitude)
+        lon1_rad = math.radians(longitude)
+        lat2_rad = math.radians(lat2)
+        lon2_rad = math.radians(lon2)
+        delta_lon = lon2_rad - lon1_rad
+        x = math.sin(delta_lon) * math.cos(lat2_rad)
+        y = math.cos(lat1_rad) * math.sin(lat2_rad) - math.sin(lat1_rad) * math.cos(lat2_rad) * math.cos(delta_lon)
+        initial_bearing = math.atan2(x, y)
+        bearing_degrees = math.degrees(initial_bearing)
+        heading = (bearing_degrees + 360) % 360
+
+        print(f"Heading to waypoint: {heading:.2f} degrees")
+        current_imu = get_latest_imu_data() % 360
+        print(f"Current heading: {current_imu:.2f} degrees")
+
+        # Compute the minimal rotation needed (-180° to 180° range)
+        rotation_degrees = ((heading - current_imu + 180) % 360) - 180
+        print(f"Initiating rotation from {current_imu:.2f}° to {heading:.2f}° (rotation: {rotation_degrees:.2f}°)")
+        
+        # Rotate the robot using the rotate_robot function
+        if rotate_robot(rc, rotation_degrees):
+            print("Rotation successful.")
+        else:
+            print("Rotation not completed within timeout.")
+
+        R = 6371000  # Earth's radius in meters
+        # Calculate differences in radians
+        dlat = math.radians(lat2 - latitude)
+        dlon = math.radians(lon2 - longitude)
+        # Compute the Haversine distance
+        a = math.sin(dlat / 2) ** 2 + math.cos(math.radians(latitude)) * math.cos(math.radians(lat2)) * math.sin(dlon / 2) ** 2
+        c = 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
+        distance_meters = R * c
+        print(f"Calculated distance to waypoint: {distance_meters:.2f} meters")
+        # Move the robot forward by the calculated distance
+        move_robot_forward_time(rc, distance_meters)
+    
+
     print(waypoints)
     await asyncio.sleep(600)  # Simulating 10-minute process
     print("Waypoint processing complete")
